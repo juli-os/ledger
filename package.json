@@ -1,20 +1,42 @@
 {
   "name": "@juli-os/ledger",
   "version": "0.1.0",
-  "description": "juli L1 layer: append-only lifecycle ledger + usage/pricing for agent work. Zero npm dependencies (node:sqlite).",
+  "description": "juli-os L1 layer: the ledger of record for agent work — workflows, steps, case files, and token usage in one zero-dependency SQLite layer.",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
   },
+  "bin": {
+    "juli-ledger": "./dist/juli-ledger.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=22.5.0"
   },
   "scripts": {
-    "test": "node --test test/",
-    "demo": "node bin/juli-ledger.ts demo /tmp/demo-ledger"
+    "build": "tsc -p tsconfig.build.json && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/index.js && esbuild bin/juli-ledger.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/juli-ledger.js && chmod +x dist/juli-ledger.js && python3 scripts/postbuild.py",
+    "test": "node --test \"test/*.test.ts\"",
+    "smoke:dist": "node --input-type=module -e \"import('./dist/index.js').then(async m => { const { join } = await import('node:path'); const { tmpdir } = await import('node:os'); const s = m.createLedgerStore(join(tmpdir(), 'peel-dist-' + Date.now() + '.db')); const wf = s.createWorkflow({kind:'case',title:'dist smoke'}); if (!s.getWorkflow(wf.id)) process.exit(1); console.log('DIST SMOKE OK'); })\"",
+    "prepublishOnly": "npm run build"
   },
-  "bin": {
-    "juli-ledger": "./bin/juli-ledger.ts"
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
   },
   "license": "Apache-2.0"
 }

@@ -49,6 +49,10 @@ Run the test suite (zero npm install):
 node --test "test/*.test.ts"
 ```
 
+## Locale note
+
+Status display labels (`queued`/`running`/… rendered values) and pricing-tier notes in the data tables are currently `zh-CN`. These are **data values, not API surface** — an i18n pass is planned; the labels are shared with the (Chinese-language) production system this layer was peeled from. All README/CLI/API/error-comment surfaces are English.
+
 ## This is a validation slice
 
 This package is the first empirical test of the **"layers you can peel off"** hypothesis (adopt at your altitude): standing alone, on a clean machine, with no node_modules, the ledger layer is fully usable. Verified green on macOS node 22 and a bare Linux box on node 24. L0 (execution substrate), L2 (artifacts), L4 (routing) follow the same recipe.

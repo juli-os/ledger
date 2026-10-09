@@ -1,6 +1,8 @@
 name: Diagnose npm token
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
 
 jobs:
   probe:

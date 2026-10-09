@@ -11,25 +11,15 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-      - name: whoami (which account does the token represent)
-        run: npm whoami
+      - name: account profile (2FA / email verification)
+        run: npm profile get || echo "EXIT=$?"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPMJS_TOKEN }}
-      - name: token sees @juli-os org packages?
-        run: |
-          echo "--- npm access ls-packages juli-os ---"
-          npm access ls-packages juli-os || echo "EXIT=$?"
+      - name: org membership as seen by THIS token
+        run: npm org ls juli-os || echo "EXIT=$?"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPMJS_TOKEN }}
-      - name: token sees @juli-labs org packages?
-        run: npm access ls-packages juli-labs || echo "EXIT=$?"
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPMJS_TOKEN }}
-      - name: raw registry org package list (status codes only)
-        run: |
-          for org in juli-os juli-labs; do
-            code=$(curl -s -o /tmp/out.json -w "%{http_code}" -H "Authorization: Bearer $NODE_AUTH_TOKEN" "https://registry.npmjs.org/-/org/$org/package")
-            echo "$org -> HTTP $code body=$(head -c 200 /tmp/out.json)"
-          done
+      - name: raw whoami endpoint
+        run: curl -s -H "Authorization: Bearer $NODE_AUTH_TOKEN" https://registry.npmjs.org/-/whoami; echo
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPMJS_TOKEN }}

@@ -23,13 +23,12 @@ function demo() {
   const store = createLedgerStore(lpath('ledger.db'));
   const usage = createUsageStore(lpath('usage.db'));
   const w1 = store.createWorkflow({ kind: 'case', title: 'Client inquiry: website redesign', meta: { from: 'client@acme.com', message_id: 'demo-001' } });
-  store.createStep({ workflowId: w1.id, seq: 1, kind: 'understand', title: 'Understand the request' });
+  store.createStep({ workflowId: w1.id, seq: 1, kind: 'agent', title: 'Understand the request' });
   store.createStep({ workflowId: w1.id, seq: 2, kind: 'agent', title: 'Draft a proposal' });
   store.setWorkflowStatus(w1.id, 'awaiting_approval' as never);
   const w2 = store.createWorkflow({ kind: 'case', title: 'Monthly report automation', meta: { from: 'ops@acme.com' } });
   store.setWorkflowStatus(w2.id, 'completed' as never);
-  const cf = emptyCaseFile(new Date());
-  cf.original = { from: 'client@acme.com', subject: 'Website redesign' };
+  const cf = { ...emptyCaseFile(new Date()), original: { from: 'client@acme.com', subject: 'Website redesign' } };
   store.saveCaseFile(w1.id, cf);
   for (let i = 0; i < 12; i++) {
     usage.record({ source: 'demo', model: i % 2 ? 'gpt-test' : 'claude-test', inputTokens: 800 + i * 120, outputTokens: 200 + i * 40, durationMs: 900 + i * 60 });

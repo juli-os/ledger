@@ -1,4 +1,4 @@
-# @juli-labs/ledger — L1 Ledger Layer (peel validation slice)
+# @juli-os/ledger — L1 Ledger Layer (peel validation slice)
 
 The L1 layer of the juli open-source ladder: **the append-only ledger of record for agent work**. Zero npm dependencies — persistence uses Node's built-in `node:sqlite`.
 
@@ -37,7 +37,7 @@ node bin/juli-ledger.ts show  /tmp/demo-ledger <workflow-id>
 Or from code:
 
 ```ts
-import { createLedgerStore } from '@juli-labs/ledger';
+import { createLedgerStore } from '@juli-os/ledger';
 const store = createLedgerStore('./ledger.db');   // opens + migrates in one call
 const wf = store.createWorkflow({ kind: 'case', title: 'First job' });
 store.createStep({ workflowId: wf.id, seq: 1, kind: 'agent', title: 'Do work' });

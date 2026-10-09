@@ -20,6 +20,5 @@ export {
   appendSection, appendExecution, appendDecision, appendReference, originalEmail,
   type CaseDecision, type ArtifactRef, type CaseFileDoc,
 } from './platform/ledger/casefile.ts';
-export { ok, err, toResult, type Result } from './platform/shared/result.ts';
 export { rfc3339, systemClock, randomIds, type Clock, type IdGen } from './platform/shared/clock.ts';
 export { asRecord, safeParse, type JsonRecord, type JsonValue } from './platform/shared/json.ts';

@@ -1,6 +1,6 @@
 {
   "name": "@juli-os/ledger",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "juli-os L1 layer: the ledger of record for agent work — workflows, steps, case files, and token usage in one zero-dependency SQLite layer.",
   "type": "module",
   "main": "./dist/index.js",

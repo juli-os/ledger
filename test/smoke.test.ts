@@ -31,8 +31,7 @@ test('step append + case file round-trip', () => {
   const step = store.createStep({ workflowId: wf.id, seq: 1, kind: 'agent' as never, title: 'Do work', input: { hint: 'ok' } });
   assert.equal(step.workflowId, wf.id);
   assert.equal(step.title, 'Do work');
-  const cf = emptyCaseFile(new Date());
-  cf.original = { from: 'peel@test', subject: 'peel smoke case file' };
+  const cf = { ...emptyCaseFile(new Date()), original: { from: 'peel@test', subject: 'peel smoke case file' } };
   store.saveCaseFile(wf.id, cf);
   assert.equal(serializeCaseFile(store.loadCaseFile(wf.id)), serializeCaseFile(cf));
 });

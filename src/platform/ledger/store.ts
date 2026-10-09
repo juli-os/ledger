@@ -154,6 +154,10 @@ export interface LifecycleStore {
    * 走 idx_events_entity 索引——守卫类消费者（乒乓守卫）不再受 listEvents
    * 全库窗口限制（entityId 过滤在窗口之后，早事件会被挤出窗外漏判）。 */
   entityEvents(entityType: LedgerEvent['entityType'], entityId: string, type: string, limit?: number): readonly LedgerEvent[];
+  /** 该实体最后一条事件的 ts（无事件返回空串）。计费窗口延伸的「run 最后
+   * 活动」锚点：在途单的回流执行回合不断落 session_turn 等事件，MAX(ts)
+   * 即活动前沿（走 idx_events_entity 索引）。 */
+  lastEventAt(entityType: LedgerEvent['entityType'], entityId: string): string;
   // runs & prompts
   createRun(workflowId: string, session: string): Run;
   hasActiveDedup(key: string): boolean;
@@ -608,6 +612,14 @@ export const createLedgerStore = (
       return (db.prepare(
         'SELECT * FROM events WHERE entity_type=? AND entity_id=? AND type=? ORDER BY id ASC LIMIT ?',
       ).all(entityType, entityId, type, limit) as Row[]).map(rowToEvent);
+    },
+
+    lastEventAt(entityType, entityId) {
+      const r = db.prepare(
+        'SELECT MAX(ts) AS m FROM events WHERE entity_type=? AND entity_id=?',
+      ).get(entityType, entityId) as Row | undefined;
+      const m = r?.['m'];
+      return m === null || m === undefined ? '' : String(m);
     },
 
     createRun(workflowId, session) {

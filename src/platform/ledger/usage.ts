@@ -92,6 +92,10 @@ export interface UsageStore {
   /** 该会话最新一次 claude_code 回合的 input tokens（≈当前 context 量级，
    * wf_a79a6fcbf7ef context 门的 compact 阈值判据）。无记录=0。 */
   latestInputTokens(tmuxSession: string): number;
+  /** 该会话最近一行 claude_code 用量的 created_at（无行返回空串）。回流
+   * 执行静默判据（wf_be61c3a55842 自动收口）：CC 回合持续产生用量行，
+   * 「事件链静默但行还在涨」= agent 仍在干活，不许收口。 */
+  lastClaudeCodeAt(tmuxSession: string): string;
   recent(limit?: number): readonly UsageRecord[];
   /** CC transcript 登记（tmux 会话 ↔ claude session 的映射）。目录扫描兜底：
    * 只插不覆盖（同 cwd 多会话互相抢登记的覆盖 bug——wf_e8d6984ba09e 三断点）。 */
@@ -140,6 +144,9 @@ export const createUsageStore = (dbPath: string, now = (): Date => new Date()): 
   try { db.exec('ALTER TABLE prompt_usage ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0'); } catch { /* 已有列 */ }
   // 会话归属（wf_2542c2c7eb13 per-workflow prompt 计数）：ingest 反查映射写入
   try { db.exec(`ALTER TABLE prompt_usage ADD COLUMN tmux_session TEXT NOT NULL DEFAULT ''`); } catch { /* 已有列 */ }
+  // 会话维度查询索引（wf_be61c3a55842 lastClaudeCodeAt 等）：列在上方 ALTER
+  // 补齐后才能建——放进 MIGRATIONS 会让新库在加列前炸 no such column。
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_usage_session ON prompt_usage(tmux_session, id)`); } catch { /* 已有索引 */ }
   return {
     record(r) {
       db.prepare(`INSERT INTO prompt_usage (source, note, model, input_tokens, output_tokens, cached_tokens, duration_ms, error, created_at)
@@ -180,6 +187,13 @@ export const createUsageStore = (dbPath: string, now = (): Date => new Date()): 
          WHERE source='claude_code' AND tmux_session=? ORDER BY id DESC LIMIT 1`,
       ).get(tmuxSession) as Row | undefined;
       return r === undefined ? 0 : n(r['i']);
+    },
+    lastClaudeCodeAt(tmuxSession) {
+      const r = db.prepare(
+        `SELECT created_at AS t FROM prompt_usage
+         WHERE source='claude_code' AND tmux_session=? ORDER BY id DESC LIMIT 1`,
+      ).get(tmuxSession) as Row | undefined;
+      return r === undefined ? '' : String(r['t'] ?? '');
     },
     perSessionWindows(tmuxSession, windows) {
       if (windows.length === 0) return { count: 0, inputTokens: 0, outputTokens: 0 };

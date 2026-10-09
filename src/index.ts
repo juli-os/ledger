@@ -3,7 +3,6 @@
 // bypass this facade to reach internal files.
 export { createLedgerStore, type LifecycleStore } from './platform/ledger/store.ts';
 export type { Workflow, Step, WorkflowStatus, StepStatus, StepKind } from './contracts/entities.ts';
-export type { StepKind } from './contracts/entities.ts';
 export { createUsageStore, type UsageStore, type UsageStats } from './platform/ledger/usage.ts';
 export { priceUsage, type UsageCost, type UsageRow } from './platform/ledger/pricing.ts';
 export {

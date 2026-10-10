@@ -5,6 +5,13 @@
 // consumers must never bypass this facade to reach internal files.
 export { createLedgerStore, type LifecycleStore } from './platform/ledger/store.ts';
 export type { Workflow, Step, WorkflowStatus, StepStatus, StepKind } from './contracts/entities.ts';
+// 0.1.3: complete the entities surface — kind capability sets + ledger companion
+// entities were internal-only; juli-service-ts consumers need them at the root
+// (2026-10-10 oss-integration fix: local shadow retirement).
+export {
+  TERMINAL_WORKFLOW_STATUSES, STEP_KINDS, AGENT_STEP_KINDS, INSTRUCTABLE_STEP_KINDS,
+  type LedgerEvent, type Run, type Prompt, type TaskView,
+} from './contracts/entities.ts';
 export {
   createUsageStore,
   type UsageRecord, type UsageStats, type TimelinePoint, type UsageStore,

@@ -1,11 +1,13 @@
-// 生命周期账本的领域类型。全部 readonly：状态转变 = 显式函数写库（store 是
-// 唯一可变边界），内存里的对象从不被就地修改。与 Go internal/ledger/lifecycle
-// 的表结构逐列对齐（迁移 V1），在途数据可双读。
+// Domain types of the lifecycle ledger. Everything is readonly: state
+// transitions = explicit functions writing to the DB (the store is the only
+// mutable boundary), and in-memory objects are never mutated in place.
+// Column-for-column aligned with the Go internal/ledger/lifecycle schema
+// (migration V1), so in-flight data can be read from both.
 
 import type { JsonRecord } from '../platform/shared/json.ts';
 
 export type WorkflowStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'rejected';
-/** 终态集合：进入即级联收口在飞 run（queued/running 均为非终态，不收口）。 */
+/** Terminal statuses: entering one cascades a close-out of in-flight runs (queued/running are non-terminal, so no close-out). */
 export const TERMINAL_WORKFLOW_STATUSES: readonly WorkflowStatus[] = [
   'completed', 'failed', 'cancelled', 'rejected',
 ];
@@ -16,18 +18,22 @@ export const STEP_KINDS: readonly StepKind[] = [
   'triage', 'gate', 'agent', 'verify', 'draft', 'send', 'llm', 'share',
 ];
 
-// ---- step kind 能力集（2026-09-22 收口）----------------------------------
-// 动词面（intervene/rework/retry-patch/reworkSend）此前各自手写 kind 集合，
-// 口径靠巧合一致。集合是语义不是 bug：干预/回修只认真正跑 agent 的步；
-// 指令承载面更宽（llm/draft 也吃 plan/prompt）。新增 kind 时在这里归队一次。
+// ---- Step-kind capability sets (consolidated 2026-09-22) -------------------
+// The verb surface (intervene/rework/retry-patch/reworkSend) previously each
+// hand-wrote its own kind list, consistent only by coincidence. The sets are
+// semantics, not bugs: intervention/rework only accepts steps that actually
+// run an agent; the instructable surface is wider (llm/draft also take
+// plan/prompt). Assign new kinds to a set here, once.
 
-/** 跑 agent 的步（可干预/可回修/计入「干活」）：engine intervene/align/
- * reworkSend/assignSession 五处 + store.runningAgentStepForSession 两路 SQL
- * 同口径（SQL 经 sqlInList 消费）。 */
+/** Steps that run an agent (intervenable/reworkable/counted as "real work"):
+ * five sites across engine intervene/align/reworkSend/assignSession plus the
+ * two SQL paths of store.runningAgentStepForSession share this definition
+ * (the SQL consumes it via sqlInList). */
 export const AGENT_STEP_KINDS: readonly StepKind[] = ['agent', 'verify'];
 
-/** 能承载指令补丁的步（plan/prompt/session）：engine rework 回扫与 retry
- * patch 两处同口径（llm/draft 也吃指令，但不可插话干预）。 */
+/** Steps that can carry instruction patches (plan/prompt/session): the engine
+ * rework back-scan and the retry patch share this definition (llm/draft also
+ * take instructions, but cannot be interrupted mid-run). */
 export const INSTRUCTABLE_STEP_KINDS: readonly StepKind[] = ['agent', 'verify', 'llm', 'draft'];
 
 export interface Workflow {
@@ -39,8 +45,9 @@ export interface Workflow {
   readonly session: string;
   readonly project: string;
   readonly path: string;
-  /** 对话（Thread）一等建模：同一线邮件往来共享的线程 id。null = 建档前
-   * 的历史行或非邮件单。线程根 = 首封邮件自己的 workflow id。 */
+  /** Threads modeled as first-class: the thread id shared by all emails in the
+   * same exchange. null = legacy rows predating filing, or non-email work
+   * orders. Thread root = the first email's own workflow id. */
   readonly threadId: string | null;
   readonly meta: JsonRecord;
   readonly createdAt: string;
@@ -58,17 +65,19 @@ export interface Step {
   readonly output: JsonRecord;
   readonly summary: string;
   readonly updatedAt: string;
-  /** 节点时序：离开 pending 的第一次转变（闸门 waiting_human 也算开跑）。
-   * 空串 = 历史行（补列迁移前）或尚未开跑。 */
+  /** Node timing: the first transition out of pending (a gate's waiting_human
+   * also counts as started). Empty string = legacy row (before the column
+   * backfill migration) or not yet started. */
   readonly startedAt: string;
-  /** 终态首次到达时刻；null = 未终结或历史行。 */
+  /** When a terminal status was first reached; null = not terminal yet or a legacy row. */
   readonly completedAt: string | null;
 }
 
 export interface LedgerEvent {
   readonly id: number;
-  /** 'agent'=会话运行时遥测（skill_used 等，entityId=会话名）——与
-   * judgment 同为「无工作流实体的留痕」，2026-10-02 skill 追溯首用。 */
+  /** 'agent' = session runtime telemetry (skill_used etc., entityId = session
+   * name) — like judgment, an auditable record with no workflow entity behind
+   * it; first used 2026-10-02 for skill traceability. */
   readonly entityType: 'workflow' | 'step' | 'judgment' | 'agent';
   readonly entityId: string;
   readonly type: string;
@@ -92,16 +101,18 @@ export interface Prompt {
   readonly createdAt: string;
 }
 
-/** Task 投影（第四期最小转正 2026-09-22）：Task 不建新表——「任务卡」=
- * meta.mode='nodes' 的 adhoc 单（engine.startTask 建），挂单经
- * meta.related_workflow（兜底 parent_id）链接。一个 Task = 任务卡 + 链上
- * 归到它的全部流水（含邮件单/跟进执行单）。 */
+/** Task projection (phase-4 minimal promotion, 2026-09-22): Task adds no new
+ * table — the "task card" is an adhoc work order with meta.mode='nodes'
+ * (created by engine.startTask); linked orders hang off
+ * meta.related_workflow (falling back to parent_id). One Task = the task
+ * card + every workflow on its chain attributed to it (including email work
+ * orders / follow-up execution orders). */
 export interface TaskView {
-  /** 任务卡 workflow id（= Task id）。 */
+  /** The task card's workflow id (= Task id). */
   readonly taskId: string;
   readonly title: string;
-  /** 任务卡自身状态（WorkflowStatus）。 */
+  /** The task card's own status (WorkflowStatus). */
   readonly status: WorkflowStatus;
-  /** 归属本 Task 的全部流水 id（含任务卡自身），新→旧。 */
+  /** All workflow ids attributed to this Task (including the task card itself), newest → oldest. */
   readonly workflowIds: readonly string[];
 }

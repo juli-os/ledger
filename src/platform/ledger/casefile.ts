@@ -1,6 +1,8 @@
-// CaseFile：持久案卷文档——工作流行上的一个 JSON 列，每步只追加自己的
-// section，任何步可读全文。本模块只提供纯函数：每次"追加"返回新文档，
-// 不变性由类型保证（对应 Go lifecycle.CaseFile 的 Set/Append 家族）。
+// CaseFile: the persistent case document — a JSON column on the workflow row.
+// Each step appends only its own section, and any step can read the whole
+// document. This module provides pure functions only: every "append" returns a
+// new document; immutability is enforced by the types (counterpart of the Go
+// lifecycle.CaseFile Set/Append family).
 
 import type { JsonRecord, JsonValue } from '../shared/json.ts';
 import { asRecord, safeParse } from '../shared/json.ts';
@@ -8,7 +10,7 @@ import { rfc3339 } from '../shared/clock.ts';
 
 export interface CaseDecision {
   readonly seq: number;
-  readonly action: string; // approved | denied | resolved | zombie_failed（看门狗）
+  readonly action: string; // approved | denied | resolved | zombie_failed (set by the watchdog)
   readonly by: string;
   readonly note: string;
   readonly at: string;
@@ -46,7 +48,7 @@ export const emptyCaseFile = (now: Date): CaseFileDoc => ({
   updatedAt: rfc3339(now),
 });
 
-/** JSON 数组 → 类型化数组的收敛守卫（经 unknown 中转，保住不变性类型）。 */
+/** Convergence guard from a JSON array to a typed array (via an unknown intermediate, preserving immutability types). */
 const pick = <T>(vals: readonly JsonValue[], guard: (v: object) => boolean): readonly T[] => {
   const out: T[] = [];
   for (const v of vals) {
@@ -55,7 +57,7 @@ const pick = <T>(vals: readonly JsonValue[], guard: (v: object) => boolean): rea
   return out;
 };
 
-/** 解析库里的 JSON 列；空/坏值 → 空白案卷（容忍历史数据）。 */
+/** Parse the JSON column stored in the DB; empty/invalid values yield a blank case file (tolerates historical data). */
 export const parseCaseFile = (raw: string | null, now: Date): CaseFileDoc => {
   const base = emptyCaseFile(now);
   const v = safeParse(raw);
@@ -85,7 +87,7 @@ export const parseCaseFile = (raw: string | null, now: Date): CaseFileDoc => {
 
 export const serializeCaseFile = (cf: CaseFileDoc): string => JSON.stringify(cf);
 
-// ---- 纯变换（每个都返回新文档）------------------------------------------------
+// ---- Pure transforms (each returns a new document) --------------------------
 
 export const withOriginal = (
   cf: CaseFileDoc,
@@ -95,8 +97,10 @@ export const withOriginal = (
   ...cf,
   original: {
     from: o.from,
-    // 发件人显示名（RFC2047 已解码）——2026-10-01 陈莉君幻觉事故后随原档
-    // 落卷：回信称呼的合法来源，agent 不再被逼对着地址起名。
+    // Sender display name (RFC2047-decoded) — recorded into the case file with
+    // the original message after the 2026-10-01 Chen Lijun hallucination
+    // incident: the legitimate source for reply salutations, so the agent is no
+    // longer forced to invent a name from the address.
     ...(o.fromName !== undefined && o.fromName !== '' ? { from_name: o.fromName } : {}),
     subject: o.subject, body: o.body, message_id: o.messageId,
   },
@@ -136,7 +140,7 @@ export const appendReference = (cf: CaseFileDoc, messageId: string, now: Date): 
   updatedAt: rfc3339(now),
 });
 
-/** 原始邮件三元组的读取视图。 */
+/** Read view over the original email triple. */
 export const originalEmail = (cf: CaseFileDoc): { from: string; subject: string; body: string; messageId: string } => ({
   from: cf.original['from'] ?? '',
   subject: cf.original['subject'] ?? '',

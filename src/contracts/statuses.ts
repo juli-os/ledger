@@ -1,42 +1,50 @@
-// 状态唯一名单（第四期 2026-09-22）：全部状态在这里登记一次——key（账本
-// 英文 mono 原文）/ 中文标签（走查语言规约：状态=中文名）/ 语义分组（进行中
-// /等决定/终态）/ 是否终态。三个消费面（总览统计卡、看板列、流水过滤）从
-// 这份名单长出来，不再各自手写清单——走查实证「总览失败 1、看板找不到失败
-// 列」的根因就是三处手工清单漂移。
+// The single registry of statuses (phase 4, 2026-09-22): every status is
+// registered here exactly once — key (the ledger's canonical English mono
+// value) / Chinese label (per the walkthrough language convention: statuses
+// use Chinese names) / semantic group (in progress / awaiting decision /
+// terminal) / whether it is terminal. Three consumers (the overview stat
+// cards, kanban columns, and workflow filters) grow from this registry
+// instead of hand-writing their own lists — the walkthrough traced the
+// "overview shows 1 failure, kanban has no failed column" bug to exactly
+// that three-way drift of hand-maintained lists.
 //
-// 名单以真实数据为准（2026-09-21 生产库只读取证）：
+// The registry is grounded in real data (read-only forensics on the
+// production DB, 2026-09-21):
 //   workflows:  cancelled 89 / completed 45 / failed 4
 //   workflow_steps DISTINCT: pending / completed / failed / cancelled
-// 加上引擎写入路径声明的全集（types.ts 的 WorkflowStatus / StepStatus，其中
-// queued/running/rejected、步态 waiting_human/skipped 当前库中为 0 行，但
-// 是引擎真实会写的状态——不是发明）。名单外的未知状态：视图显示原文字符串
-// 并归入「其他」分组，绝不隐藏。
+// plus the full set declared by the engine's write paths (WorkflowStatus /
+// StepStatus in types.ts; queued/running/rejected and the step statuses
+// waiting_human/skipped have 0 rows in the current DB, but the engine
+// genuinely writes them — nothing is invented). Unknown statuses outside
+// the registry: views display the raw string and file it under the "other"
+// group — never hidden.
 
 import type { StepStatus, WorkflowStatus } from './entities.ts';
 
-/** 语义分组：进行中（账上在走）/ 等决定（卡在人）/ 终态（收口）。 */
+/** Semantic groups: in progress (still moving on the ledger) / awaiting decision (blocked on a human) / terminal (closed out). */
 export type StatusGroup = '进行中' | '等决定' | '终态';
 
 export interface StatusDef {
-  /** 账本原文（英文 mono）。 */
+  /** Canonical ledger value (English mono). */
   readonly key: string;
-  /** 中文名（走查语言规约：状态=中文名）。 */
+  /** Chinese label (per the walkthrough language convention: statuses use Chinese names). */
   readonly label: string;
-  /** 语义分组；名单外一律归「其他」（STATUS_GROUP_OTHER）。 */
+  /** Semantic group; anything outside the registry falls into "other" (STATUS_GROUP_OTHER). */
   readonly group: StatusGroup;
-  /** 终态 = 进入即收口（对齐 types.ts TERMINAL_WORKFLOW_STATUSES）。 */
+  /** Terminal = entering it closes the workflow out (aligned with TERMINAL_WORKFLOW_STATUSES in types.ts). */
   readonly terminal: boolean;
 }
 
-/** 名单外状态的分组名：未知状态显示原文并归入「其他」，不隐藏。 */
+/** Group name for statuses outside the registry: unknown statuses display their raw value and fall into "other", never hidden. */
 export const STATUS_GROUP_OTHER = '其他';
 
-/** key 收窄到账本类型的名单项（satisfies 用：key 对齐 WorkflowStatus 联合，
- * label/group/terminal 对齐 StatusDef——两边都由类型系统锁）。 */
+/** Registry entry with key narrowed to the ledger type (for satisfies: key
+ * aligned to the WorkflowStatus union, label/group/terminal aligned to
+ * StatusDef — both sides locked by the type system). */
 export type WorkflowStatusDef = StatusDef & { readonly key: WorkflowStatus };
 export type StepStatusDef = StatusDef & { readonly key: StepStatus };
 
-/** 流水（workflow）状态名单，序 = 看板列序/过滤序。 */
+/** Workflow status registry; ordering = kanban column order / filter order. */
 export const WORKFLOW_STATUSES: readonly StatusDef[] = [
   { key: 'queued', label: '排队中', group: '进行中', terminal: false },
   { key: 'running', label: '进行中', group: '进行中', terminal: false },
@@ -46,9 +54,11 @@ export const WORKFLOW_STATUSES: readonly StatusDef[] = [
   { key: 'rejected', label: '已拒绝', group: '终态', terminal: true },
 ] satisfies readonly WorkflowStatusDef[];
 
-/** 步骤（workflow_steps）状态名单。waiting_human（等你决定）是【步态】——
- * 账本里 workflow.status 永远不会是它（看板的「等你决定」列是 running 单
- * + waiting 步数的投影，见 web/src/statuses.ts）；名单只收账本真实存在的。 */
+/** Step (workflow_steps) status registry. waiting_human ("awaiting your
+ * decision") is a step-only status — workflow.status in the ledger is never
+ * it (the kanban "awaiting decision" column is a projection of running
+ * workflows + waiting steps, see web/src/statuses.ts); the registry holds
+ * only statuses that genuinely exist in the ledger. */
 export const STEP_STATUSES: readonly StatusDef[] = [
   { key: 'pending', label: '待排', group: '进行中', terminal: false },
   { key: 'running', label: '进行中', group: '进行中', terminal: false },
@@ -59,47 +69,56 @@ export const STEP_STATUSES: readonly StatusDef[] = [
   { key: 'skipped', label: '已跳过', group: '终态', terminal: true },
 ] satisfies readonly StepStatusDef[];
 
-/** 查名单：命中返回定义，名单外返回 undefined（调用方兜「其他」）。 */
+/** Registry lookup: returns the definition on a hit, undefined otherwise (callers fall back to "other"). */
 export const workflowStatusDef = (key: string): StatusDef | undefined =>
   WORKFLOW_STATUSES.find((s) => s.key === key);
 
 export const stepStatusDef = (key: string): StatusDef | undefined =>
   STEP_STATUSES.find((s) => s.key === key);
 
-/** 状态 → 中文标签：名单外原样返回 key（显示原文，不猜不译）。 */
+/** Status → Chinese label: statuses outside the registry return the key verbatim (display the raw value; no guessing, no translating). */
 export const statusLabelOf = (key: string): string => workflowStatusDef(key)?.label ?? key;
 
-// ---- 状态谓词（从名单派生的单一事实源，2026-09-22 收口）------------------
-// 背景：名单第四期收口了「标签/分组」，但「在途/收口/存活」三个语义集合在
-// engine（10+ 处）与 store SQL（7+ 处）里仍是手写字面量——历史上已两次事后
-// 追补（queued 补进在途、failed 从事故排除中保留），全是手写清单漂移的实证。
-// 谓词语义三档，绝不混用：
-//   terminal = 状态机终态（进入即不再转变，含 failed——failed 仍可 retry 翻回，
-//              但那是动作不是自发转变）；
-//   settled  = 收口语义（completed/cancelled，无失败遗留——settle/收口判据，
-//              failed 在外因为它是可重试的未决失败，rejected 是人工否决）；
-//   active   = 在途（账上还可能自己动）。
+// ---- Status predicates (single source of truth derived from the registry,
+// consolidated 2026-09-22) ---------------------------------------------------
+// Background: phase 4 of the registry consolidated "labels/groups", but the
+// three semantic sets "active / settled / live" were still hand-written
+// literals in the engine (10+ sites) and store SQL (7+ sites) — patched
+// after the fact twice already (queued retro-added to active; failed kept
+// out of incident exclusion), all evidence of hand-written list drift.
+// Three predicate tiers, never to be conflated:
+//   terminal = state-machine terminal status (no further transitions once
+//              entered; includes failed — failed can still be retried back,
+//              but that is an action, not a spontaneous transition);
+//   settled  = closed-out semantics (completed/cancelled, no failure left
+//              behind — the settle/close-out criterion; failed is out
+//              because it is a retryable open failure, rejected is a human
+//              veto);
+//   active   = in flight (the ledger may still move on its own).
 
-/** 在途步集合：pending/running/waiting_human（推进/取消/对账的守卫口径）。 */
+/** Active step statuses: pending/running/waiting_human (the guard definition for advancing/cancelling/reconciliation). */
 export const ACTIVE_STEP_STATUSES: readonly string[] =
   STEP_STATUSES.filter((s) => !s.terminal).map((s) => s.key);
-/** 在途单集合：queued/running。 */
+/** Active workflow statuses: queued/running. */
 export const ACTIVE_WORKFLOW_STATUSES: readonly string[] =
   WORKFLOW_STATUSES.filter((s) => !s.terminal).map((s) => s.key);
-/** 收口步集合：completed/cancelled（settle 判据——failed 在外：可重试的未决失败）。 */
+/** Settled step statuses: completed/cancelled (the settle criterion — failed excluded: a retryable open failure). */
 export const SETTLED_STEP_STATUSES: readonly string[] =
   STEP_STATUSES.filter((s) => s.key === 'completed' || s.key === 'cancelled').map((s) => s.key);
-/** 收口单集合：completed/cancelled。 */
+/** Settled workflow statuses: completed/cancelled. */
 export const SETTLED_WORKFLOW_STATUSES: readonly string[] =
   WORKFLOW_STATUSES.filter((s) => s.key === 'completed' || s.key === 'cancelled').map((s) => s.key);
-/** 终态步集合：名单 terminal 标记（completed/failed/cancelled/skipped）。 */
+/** Terminal step statuses: the registry's terminal flags (completed/failed/cancelled/skipped). */
 export const TERMINAL_STEP_STATUSES: readonly string[] =
   STEP_STATUSES.filter((s) => s.terminal).map((s) => s.key);
-/** dedup 窗口单集合：queued/running + waiting_human（防御值——账本
- * workflow.status 不产生它，历史 SQL 携带；保持原样零语义变化）。 */
+/** Dedup-window workflow statuses: queued/running + waiting_human (a defensive
+ * value — the ledger's workflow.status never produces it, but historical SQL
+ * carries it; kept as-is with zero semantic change). */
 export const DEDUP_WINDOW_STATUSES: readonly string[] = ['queued', 'running', 'waiting_human'];
-/** prune 单集合：completed/cancelled/rejected——failed 保留（事故取证语义，
- * 2026-09-15 裁决），与 settle 收口集不同档：rejected 人工否决可清，failed 留人查。 */
+/** Prunable workflow statuses: completed/cancelled/rejected — failed is retained
+ * (incident-forensics semantics, ruled 2026-09-15); a different tier from the
+ * settled set: a human veto (rejected) can be cleaned up, failed stays for
+ * humans to inspect. */
 export const PRUNE_WORKFLOW_STATUSES: readonly string[] = ['completed', 'cancelled', 'rejected'];
 
 export const isActiveStepStatus = (s: string): boolean => ACTIVE_STEP_STATUSES.includes(s);
@@ -108,9 +127,11 @@ export const isSettledStepStatus = (s: string): boolean => SETTLED_STEP_STATUSES
 export const isSettledWorkflowStatus = (s: string): boolean => SETTLED_WORKFLOW_STATUSES.includes(s);
 export const isTerminalStepStatus = (s: string): boolean => TERMINAL_STEP_STATUSES.includes(s);
 
-/** 存活节点（appendNode send/gate 判重口径）：未 failed 且未 cancelled——
- * completed 也算（判重语义：同单已有非失败 send 不建第二封，哪怕首封已发完）。 */
+/** Live node (the dedup definition for appendNode send/gate): not failed and
+ * not cancelled — completed counts too (dedup semantics: a work order with an
+ * existing non-failed send does not create a second one, even if the first
+ * has already been sent). */
 export const isLiveNodeStatus = (s: string): boolean => s !== 'failed' && s !== 'cancelled';
 
-/** 谓词集合 → SQL IN 列表（值全部来自本文件名单常量，无注入面）。 */
+/** Predicate set → SQL IN list (values all come from registry constants in this file; no injection surface). */
 export const sqlInList = (keys: readonly string[]): string => keys.map((k) => `'${k}'`).join(',');

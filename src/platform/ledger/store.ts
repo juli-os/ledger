@@ -1,9 +1,13 @@
-// 生命周期账本：SQLite（node:sqlite，零原生依赖）之上的持久边界。
-// 与 Go internal/ledger/lifecycle 的 V1 表结构逐列对齐，历史数据可双读。
+// Lifecycle ledger: the persistence boundary on top of SQLite (node:sqlite,
+// zero native dependencies). Column-for-column aligned with the V1 schema of
+// the Go internal/ledger/lifecycle, so historical data can be read from both.
 //
-// 不变性策略：本 store 是系统唯一的可变边界；所有 JSON 列的更新都是
-// 读-合并-写（node:sqlite 同步驱动，读写之间不可能被并发插入），引擎与
-// HTTP 层拿到的都是冻结快照。状态转变只经显式方法发生，绝不整行 DELETE。
+// Immutability policy: this store is the system's only mutable boundary; all
+// JSON-column updates are read-merge-write (the node:sqlite synchronous
+// driver leaves no room for a concurrent write between the read and the
+// write), and the engine and HTTP layer only ever receive frozen snapshots.
+// State transitions happen only through explicit methods; never a full-row
+// DELETE.
 
 import { DatabaseSync } from 'node:sqlite';
 import type { JsonRecord, JsonValue } from '../shared/json.ts';
@@ -99,15 +103,19 @@ export interface LifecycleStore {
   setWorkflowSession(id: string, session: string): void;
   updateWorkflowMeta(id: string, patch: JsonRecord): JsonRecord;
   setWorkflowRouting(id: string, session: string, project: string): void;
-  // 对话（Thread）建档与匹配查询：engine 只调方法，SQL 留在本层。
-  /** 归组：把 workflow 挂到线程（首次建档或继承）。threadId 为空串 = 拒绝。 */
+  // Thread filing and matching queries: the engine only calls methods; the SQL stays in this layer.
+  /** Grouping: attach a workflow to a thread (first filing or inheritance). An empty threadId is rejected. */
   assignThread(workflowId: string, threadId: string): void;
-  /** 进件匹配①：meta.message_id 精确反查最新单（in_reply_to 的因果锚）。
-   * 不限状态——被拒的信也是对方在回复的那封。excludeWorkflowId = 本单
-   * （新行已落库才跑匹配，不排除会自己匹配自己）。 */
+  /** Intake matching (1): exact meta.message_id lookup of the latest work order
+   * (the causal anchor for in_reply_to). Status is unrestricted — a rejected
+   * message is still the one being replied to. excludeWorkflowId = this work
+   * order (matching runs after the new row is already stored, so without the
+   * exclusion it would match itself). */
   latestByMessageId(messageId: string, excludeWorkflowId?: string): Workflow | null;
-  /** 进件匹配②候选集：同发件人（大小写不敏感）+ 时间窗内、非 rejected 的单，
-   * 新→旧。主题归一化比对在 engine（SQL 表达不了「剥 Re:/回复：」），本层只收窄。 */
+  /** Intake matching (2) candidate set: same sender (case-insensitive) + within
+   * the time window, non-rejected work orders, newest → oldest. Subject
+   * normalization ("stripping Re:/reply:" prefixes) happens in the engine —
+   * SQL can't express it; this layer only narrows the set. */
   recentBySender(from: string, sinceIso: string, excludeWorkflowId?: string, limit?: number): readonly Workflow[];
   // casefile
   loadCaseFile(id: string): CaseFileDoc;
@@ -116,7 +124,7 @@ export interface LifecycleStore {
   createStep(s: {
     workflowId: string; seq: number; kind: StepKind; title: string; input?: JsonRecord;
   }): Step;
-  /** 动态展开：在 afterSeq 之后插入若干步，既有 tail 顺延。单事务。 */
+  /** Dynamic expansion: insert several steps after afterSeq; the existing tail shifts up. Single transaction. */
   insertStepsAt(workflowId: string, afterSeq: number, steps: readonly {
     kind: StepKind; title: string; input?: JsonRecord;
   }[]): void;
@@ -125,62 +133,84 @@ export interface LifecycleStore {
   currentStep(id: string): Step | null;
   setStepStatus(id: string, status: StepStatus): void;
   setStepInput(id: string, patch: JsonRecord): void;
-  // 回流外发箱：批准=触发下一个 的持久化投递（送达销账，永丢不允许）。
+  // Relay outbox for background sends: approval = a persisted delivery that
+  // triggers the next step (settled once delivered; silent loss is not allowed).
   insertRelay(r: { workflowId: string; stepId: string; session: string; text: string; marker: string }): string;
   pendingRelays(): readonly { id: string; workflowId: string; stepId: string; session: string; text: string; marker: string; createdAt: string; attempts: number; lastError: string }[];
   markRelayDelivered(id: string): void;
   markRelayAttempt(id: string, error: string): void;
   setStepOutput(id: string, patch: JsonRecord): void;
-  /** 原子数组追加：同一条语句序列内完成读-append-裁剪-写（node:sqlite
-   * 同步 = 原子段）。recordActivity 的读-合并-写曾以陈旧快照覆盖并发条目。 */
+  /** Atomic array append: read-append-trim-write within one synchronous
+   * statement sequence (node:sqlite synchronous = atomic section).
+   * recordActivity's read-merge-write once overwrote concurrent entries with
+   * a stale snapshot. */
   appendStepOutputItem(id: string, key: string, entry: JsonValue, cap: number): void;
-  /** 原子 CAS：running→completed。返回 false = 已被其他路径结算（settle-once）。 */
+  /** Atomic CAS: running→completed. Returns false = already settled by another path (settle-once). */
   claimRunningStep(id: string): boolean;
   listSteps(status: StepStatus, limit?: number): readonly Step[];
   runningAgentStepForSession(session: string): Step | null;
-  /** 忙闲谓词（2026-09-30 用户裁定重定义）：忙 = 名下存在非终态单——排队/
-   * 在跑/停在闸门等批准都算；唯一闲 = 名下单子全部终态。锚定与
-   * runningAgentStepForSession 兜底同源（session 列 / meta.assigned_session /
-   * runs 行），queued 期的锚定靠进件播种时即写 session 列。消费方：派发面
-   * 忙闲改道、路由图占用、routeTask 落点判定（要「正在跑那一步」本体的
-   * 僵尸看门狗/结算不走这里）。excludeWorkflowId 供派发面自排除——本单
-   * 自己就锚在目标会话且非终态，不排除=每次派发都自触发改道。 */
+  /** Busy/idle predicate (redefined by user ruling, 2026-09-30): busy = a
+   * non-terminal work order exists under the session's name — queued, running,
+   * or parked at a gate awaiting approval all count; the only idle = every
+   * work order under the session is terminal. Anchoring shares the same
+   * sources as the runningAgentStepForSession fallback (session column /
+   * meta.assigned_session / runs rows); anchoring during the queued phase
+   * relies on the session column being written at intake seeding time.
+   * Consumers: dispatch-side busy/idle diversion, routing-graph occupancy,
+   * routeTask target-session resolution (the zombie watchdog / settlement
+   * that need the "currently running step" itself do not go through here).
+   * excludeWorkflowId lets the dispatch side exclude itself — this work order
+   * is itself anchored on the target session and non-terminal, so without the
+   * exclusion every dispatch would trigger its own diversion. */
   sessionHasOpenWork(session: string, excludeWorkflowId?: string): boolean;
   // events
   appendEvent(entityType: 'workflow' | 'step' | 'judgment' | 'agent', entityId: string, type: string, payload?: JsonRecord): LedgerEvent;
   listEvents(limit?: number, types?: readonly string[]): readonly LedgerEvent[];
   eventsSince(afterId: number, limit?: number): readonly LedgerEvent[];
-  /** per-entity 事件查询（P2-5）：WHERE entity_type+entity_id+type 的全史回放，
-   * 走 idx_events_entity 索引——守卫类消费者（乒乓守卫）不再受 listEvents
-   * 全库窗口限制（entityId 过滤在窗口之后，早事件会被挤出窗外漏判）。 */
+  /** Per-entity event query (P2-5): full-history replay filtered by
+   * entity_type+entity_id+type, served by the idx_events_entity index —
+   * guard-style consumers (the ping-pong guard) are no longer bound by
+   * listEvents' whole-DB window (entityId filtering happened after the
+   * window, so early events fell out of it and were missed). */
   entityEvents(entityType: LedgerEvent['entityType'], entityId: string, type: string, limit?: number): readonly LedgerEvent[];
-  /** 该实体最后一条事件的 ts（无事件返回空串）。计费窗口延伸的「run 最后
-   * 活动」锚点：在途单的回流执行回合不断落 session_turn 等事件，MAX(ts)
-   * 即活动前沿（走 idx_events_entity 索引）。 */
+  /** ts of the entity's last event (empty string when there are none). The
+   * "run last activity" anchor for billing-window extension: a work order in
+   * flight keeps landing session_turn and similar events from background
+   * execution turns, so MAX(ts) is the activity frontier (served by the
+   * idx_events_entity index). */
   lastEventAt(entityType: LedgerEvent['entityType'], entityId: string): string;
   // runs & prompts
   createRun(workflowId: string, session: string): Run;
   hasActiveDedup(key: string): boolean;
-  /** 轮询层去重：任何非 rejected 工作流含此 dedup_key 即视为已摄取。 */
+  /** Polling-layer dedup: any non-rejected workflow containing this dedup_key counts as already ingested. */
   hasSeenDedup(key: string): boolean;
-  /** 自回环守卫（断点十三）：message_id 命中 completed send 步 output.message_id。 */
+  /** Self-loop guard (breakpoint 13): the message_id hits the output.message_id of a completed send step. */
   sentMessageIdExists(messageId: string): boolean;
-  /** 全量出站邮件登记（2026-09-20 幽灵单缺口）：send 步之外，通知邮件
-   * （emailNotifier）等所有出站信的 message_id 也进查询面——发给轮询
-   * 邮箱自身的告警信不再被当新来信建单（[juli] 待审批 幽灵单）。 */
+  /** Register every outbound email (2026-09-20 ghost-work-order gap): beyond
+   * send steps, the message_ids of all outbound mail — notification emails
+   * (emailNotifier) included — enter the query surface, so alert mail sent to
+   * the polling mailbox itself is no longer filed as a new inbound message
+   * (the "[juli] pending approval" ghost work orders). */
   recordSentMessageId(messageId: string, meta?: { to?: string; subject?: string }): void;
   activeRunForSession(session: string): Run | null;
   createPrompt(runId: string, content: string, source: string): Prompt;
   latestPromptForSession(session: string, statuses: readonly Prompt['status'][]): Prompt | null;
-  /** 修剪：events 超期删除；终态（completed/cancelled/rejected）工作流超期连同步骤删除，
-   * failed 一律保留（事故语义）。返回删除行数。 */
+  /** Pruning: events past retention are deleted; terminal
+   * (completed/cancelled/rejected) workflows past retention are deleted along
+   * with their steps, while failed is always retained (incident semantics).
+   * Returns the number of deleted rows. */
   prune(retentionDays: number): { events: number; workflows: number };
-  /** Task 投影（第四期最小转正 2026-09-22）：Task 继续不建新表——任务卡
-   * （meta.mode='nodes' 的单，engine.startTask 建）+ related_workflow/parent_id
-   * 链聚成「一 Task 多流水」视图。返回任务卡视图（新→旧）与
-   * workflowId→taskId 归属表（无任务卡祖先的单如普通邮件流不进表）。
-   * 根判据：沿链向上最高的任务卡；任务卡挂在邮件单下（方向修正链）时根=
-   * 任务卡自身——邮件单不是任务卡，不吞并。展示级投影，默认扫最近 500 单。 */
+  /** Task projection (phase-4 minimal promotion, 2026-09-22): Task still adds
+   * no new table — the task card (a work order with meta.mode='nodes', created
+   * by engine.startTask) plus the related_workflow/parent_id chain aggregate
+   * into a "one Task, many workflows" view. Returns the task-card views
+   * (newest → oldest) and a workflowId→taskId attribution map (work orders
+   * with no task-card ancestor, such as plain email flows, stay out of the
+   * map). Root criterion: the highest task card up the chain; when a task card
+   * hangs under an email work order (a direction-corrected chain) the root is
+   * the task card itself — an email order is not a task card and is not
+   * absorbed. Display-level projection; scans the most recent 500 work orders
+   * by default. */
   taskViews(limit?: number): { readonly views: readonly TaskView[]; readonly map: Readonly<Record<string, string>> };
 }
 
@@ -191,17 +221,20 @@ const str = (v: string | number | bigint | null | Uint8Array | undefined): strin
 const num = (v: string | number | bigint | null | Uint8Array | undefined): number =>
   typeof v === 'number' ? v : Number(v ?? 0);
 
-/** meta JSON 里的 dedup_key LIKE 模式，必须配 `ESCAPE '\'` 使用。
- * 两步：先取 JSON 实际存储字节（`"`→`\"` 等由 JSON 编码），再对 LIKE 特殊字符
- * （`\ % _`）转义——引号本身在 LIKE 里无特殊义，转义的是 JSON 加的那道反斜杠。 */
+/** LIKE pattern for dedup_key inside the meta JSON; must be paired with
+ * `ESCAPE '\'`. Two steps: first take the bytes JSON actually stores (`"`→`\"`
+ * etc., from JSON encoding), then escape the LIKE-special characters
+ * (`\ % _`) — the quote itself has no special meaning in LIKE; what gets
+ * escaped is the backslash JSON added. */
 const dedupPattern = (key: string): string => {
   const jsonValue = JSON.stringify(key).slice(1, -1);
   return `%"dedup_key":"${jsonValue.replace(/[%_\\]/g, (c) => `\\${c}`)}"%`;
 };
 
-/** sentMessageIdExists LIKE 路的时间窗（rfc3339 字符串序比较）：mailer seam
- * 全量出站登记上线（2026-09-19 commit 窗）之前的 completed send 步才走
- * LIKE——之后的出站信全部在 events 精确路。 */
+/** Time window for the sentMessageIdExists LIKE path (rfc3339 lexicographic
+ * comparison): only completed send steps predating the mailer seam's full
+ * outbound registration (commit window of 2026-09-19) take the LIKE path —
+ * every later outbound message is on the exact events path. */
 const SEND_STEP_LIKE_CUTOFF = '2026-09-19';
 
 const rowToWorkflow = (r: Row): Workflow => ({
@@ -247,8 +280,9 @@ const pruneImpl = (db: DatabaseSync, retentionDays: number, nowIso: string): { e
   if (retentionDays <= 0) return { events: 0, workflows: 0 };
   const cutoff = new Date(new Date(nowIso).getTime() - retentionDays * 86_400_000).toISOString();
   const ev = db.prepare('DELETE FROM events WHERE ts < ?').run(cutoff);
-  // 终态工作流清理（连步骤）：名单见 statuses.ts PRUNE_WORKFLOW_STATUSES
-  // （failed 保留——事故语义）。
+  // Terminal-workflow cleanup (steps included): the list lives in
+  // statuses.ts PRUNE_WORKFLOW_STATUSES (failed retained — incident
+  // semantics).
   const wfRows = db.prepare(
     `SELECT id FROM workflows WHERE status IN (${sqlInList(PRUNE_WORKFLOW_STATUSES)}) AND updated_at < ?`,
   ).all(cutoff) as { id: string }[];
@@ -273,27 +307,33 @@ export const createLedgerStore = (
   const ids = deps.ids ?? randomIds;
   const db = new DatabaseSync(dbPath);
   db.exec(MIGRATIONS);
-  // V2 预留：owner 列支撑未来多租户/多操作员（可空，零行为变化）。
-  // 现在加列是零成本，事后加列在有数据的表上是手术。
+  // Reserved for V2: the owner column supports future multi-tenant /
+  // multi-operator use (nullable, zero behavior change). Adding the column
+  // now is free; adding it later to a table with data is surgery.
   const wfCols = (db.prepare("PRAGMA table_info(workflows)").all() as { name: string }[]).map((c) => c.name);
   if (!wfCols.includes('owner')) {
     db.exec('ALTER TABLE workflows ADD COLUMN owner TEXT');
   }
-  // 对话（Thread）一等建模（2026-09-21 二期）：邮件回复链共享 thread_id——
-  // 追加可空列合法（行内容不可变纪律只禁改写，不禁加列），索引服务看板归组。
+  // Threads as first-class (phase 2, 2026-09-21): an email reply chain shares
+  // thread_id — appending a nullable column is legitimate (the row-content
+  // immutability discipline only forbids rewriting, not adding columns); the
+  // index serves kanban grouping.
   if (!wfCols.includes('thread_id')) {
     db.exec('ALTER TABLE workflows ADD COLUMN thread_id TEXT');
   }
-  // 索引必须在加列之后建：MIGRATIONS 段跑在建表时，thread_id 还不存在。
+  // The index must be created after the column: the MIGRATIONS block runs at
+  // table creation, when thread_id doesn't exist yet.
   db.exec('CREATE INDEX IF NOT EXISTS idx_workflows_thread ON workflows(thread_id)');
-  // 步骤时序（started/completed）：存量库补列——节点时序此前只能靠事件流
-  // 重放（goShape 自认 created_at 是假的）；列允许 NULL 兼容历史行。
+  // Step timing (started/completed): backfill columns for existing DBs —
+  // node timing previously could only be reconstructed by replaying the event
+  // stream (goShape itself admits created_at is fake); the columns are
+  // NULLable to stay compatible with historical rows.
   const stepCols = (db.prepare("PRAGMA table_info(workflow_steps)").all() as { name: string }[]).map((c) => c.name);
   if (!stepCols.includes('started_at')) db.exec('ALTER TABLE workflow_steps ADD COLUMN started_at TEXT');
   if (!stepCols.includes('completed_at')) db.exec('ALTER TABLE workflow_steps ADD COLUMN completed_at TEXT');
   const now = (): string => rfc3339(clock.now());
 
-  // JSON 列的读-合并-写（同步驱动下即原子）。
+  // Read-merge-write for JSON columns (atomic under the synchronous driver).
   const mergeStepJson = (id: string, col: 'input' | 'output', patch: JsonRecord): void => {
     const row = db.prepare(`SELECT COALESCE(${col},'{}') AS v FROM workflow_steps WHERE id=?`).get(id);
     const cur = asRecord(safeParse(str(row?.['v'])));
@@ -344,9 +384,12 @@ export const createLedgerStore = (
     },
 
     listWorkflows(limit = 100, status?) {
-      // rowid 次序兜底：同秒创建的工作流也保持稳定的新→旧序。
-      // status 等值过滤（NEW-2）：在窗口之前收窄——否则长跑 running 单会被
-      // 新建单挤出 LIMIT 窗（CLI 转派的会话→案卷查找正是这个形态）。
+      // rowid order as a tiebreaker: workflows created in the same second
+      // still keep a stable newest → oldest order.
+      // Status equality filter (NEW-2): narrow before the window — otherwise
+      // long-running workflows get pushed out of the LIMIT window by newly
+      // created ones (the CLI's session→case-file lookup for reassignment is
+      // exactly this shape).
       if (status !== undefined && status !== '') {
         return (db.prepare('SELECT * FROM workflows WHERE status=? ORDER BY created_at DESC, rowid DESC LIMIT ?')
           .all(status, limit) as Row[]).map(rowToWorkflow);
@@ -360,10 +403,12 @@ export const createLedgerStore = (
     },
     setWorkflowStatus(id, status) {
       db.prepare('UPDATE workflows SET status=?, updated_at=? WHERE id=?').run(status, now(), id);
-      // 终态级联：在飞 run 一并收口（对齐 Go 的 terminal 转变），否则
-      // activeRunForSession/对账会被已完成工作流的僵尸 run 污染。
-      // 收单台（0920）：queued 是新非终态——判据从「非 running」改为终态
-      // 白名单，否则入队即误收口在飞 run。
+      // Terminal cascade: close out in-flight runs too (aligned with the Go
+      // terminal transition), otherwise activeRunForSession / reconciliation
+      // would be polluted by zombie runs of completed workflows.
+      // Intake desk (0920): queued is a new non-terminal status — the
+      // criterion changed from "not running" to a terminal whitelist;
+      // otherwise enqueuing would wrongly close in-flight runs.
       if (TERMINAL_WORKFLOW_STATUSES.includes(status)) {
         const runStatus = status === 'failed' ? 'failed' : 'completed';
         db.prepare(`UPDATE runs SET status=? WHERE workflow_id=? AND status IN ('running','idle')`)
@@ -475,8 +520,10 @@ export const createLedgerStore = (
     },
 
     setStepStatus(id, status) {
-      // 状态转变顺带记时序：离开 pending 的第一次转变 = started（闸门的
-      // waiting_human 也是"开跑"）；终态第一次到达 = completed。
+      // Status transitions record timing as a side effect: the first
+      // transition out of pending = started (a gate's waiting_human also
+      // counts as "started"); the first arrival at a terminal status =
+      // completed.
       db.prepare(`UPDATE workflow_steps SET status=?, updated_at=?,
         started_at=COALESCE(started_at, CASE WHEN ? NOT IN ('pending') THEN ? END),
         completed_at=CASE WHEN ? IN (${sqlInList(TERMINAL_STEP_STATUSES)})
@@ -509,8 +556,10 @@ export const createLedgerStore = (
     setStepOutput(id, patch) { mergeStepJson(id, 'output', patch); },
 
     appendStepOutputItem(id, key, entry, cap) {
-      // 读-append-裁剪-写一气呵成：与 mergeStepJson 同级的同步段，中间没有
-      // 任何 await——并发 hook 事件不会互相覆盖（cap 裁剪保尾部最近条目）。
+      // Read-append-trim-write in one go: a synchronous section on par with
+      // mergeStepJson, with no await in between — concurrent hook events
+      // cannot overwrite each other (the cap trim keeps the most recent
+      // entries at the tail).
       const row = db.prepare(`SELECT COALESCE(output,'{}') AS v FROM workflow_steps WHERE id=?`).get(id);
       const cur = asRecord(safeParse(str(row?.['v'])));
       const arr: JsonValue[] = Array.isArray(cur[key]) ? [...cur[key] as JsonValue[], entry] : [entry];
@@ -534,8 +583,9 @@ export const createLedgerStore = (
     },
 
     runningAgentStepForSession(session) {
-      // 主路：runs 行反查（引擎派发时必建 run）。JOIN 下列名必须限定
-      // （裸 `id` 会撞上 workflows/runs 的 id）。
+      // Primary path: reverse lookup via runs rows (the engine always creates
+      // a run at dispatch). Column names in the JOIN must be qualified (a
+      // bare `id` would collide with the workflows/runs ids).
       const r = db.prepare(
         `SELECT st.id AS id, st.workflow_id AS workflow_id, st.seq AS seq, st.kind AS kind,
                 COALESCE(st.title,'') AS title, st.status AS status,
@@ -548,10 +598,12 @@ export const createLedgerStore = (
          ORDER BY st.updated_at DESC LIMIT 1`,
       ).get(session);
       if (r) return rowToStep(r as Row);
-      // 兜底（2026-09-14 wf_994b0eb399ab 断链）：绕过引擎派发的步骤没有
-      // runs 行，Stop hook 报到时若只认 runs 就永远找不到在跑步骤——agent
-      // 干完了、引擎不知道、闸门永不打开。退回 workflow 的一等会话字段
-      // （session / meta.assigned_session，与 claimedContainerFor 同源）。
+      // Fallback (2026-09-14 wf_994b0eb399ab broken chain): steps that
+      // bypassed engine dispatch have no runs row; if the Stop hook trusted
+      // only runs it would never find the running step — the agent finished,
+      // the engine never knew, the gate never opens. Fall back to the
+      // workflow's first-class session fields (session /
+      // meta.assigned_session, same sources as claimedContainerFor).
       const r2 = db.prepare(
         `SELECT st.id AS id, st.workflow_id AS workflow_id, st.seq AS seq, st.kind AS kind,
                 COALESCE(st.title,'') AS title, st.status AS status,
@@ -567,9 +619,11 @@ export const createLedgerStore = (
     },
 
     sessionHasOpenWork(session, excludeWorkflowId) {
-      // 三锚点并集（2026-09-30）：session 列（播种即锚，queued 也占）/
-      // meta.assigned_session（历史兜底）/ runs 行（派发事实——老单与测试
-      // 造法只有 runs）。终态单被 status 过滤挡在门外，锚点宽不会误伤。
+      // Union of three anchors (2026-09-30): the session column (anchored at
+      // seeding; queued counts too) / meta.assigned_session (historical
+      // fallback) / runs rows (the dispatch fact — legacy orders and test
+      // setups only have runs). Terminal orders are kept out by the status
+      // filter, so the wide anchors can't misfire.
       const anchor = '(session=?1 OR COALESCE(json_extract(meta,\'$.assigned_session\'),\'\')=?1'
         + ' OR id IN (SELECT workflow_id FROM runs WHERE session=?1))';
       const sql = excludeWorkflowId !== undefined && excludeWorkflowId !== ''
@@ -592,8 +646,10 @@ export const createLedgerStore = (
     },
 
     listEvents(limit = 200, types?: readonly string[]) {
-      // 类型过滤回放（2026-09-22 路由图）：稀有事件（route_*，账本里只有十几条）
-      // 深埋在 12 万行窗口之外——过滤后 limit 全部花在该类型上，真实历史可达。
+      // Type-filtered replay (2026-09-22 routing graph): rare events
+      // (route_*, barely a dozen rows in the ledger) were buried deep beyond
+      // the 120k-row window — with the filter the limit is spent entirely on
+      // that type, making the real history reachable.
       if (types !== undefined && types.length > 0) {
         const ph = types.map(() => '?').join(',');
         return (db.prepare(`SELECT * FROM events WHERE type IN (${ph}) ORDER BY id DESC LIMIT ?`)
@@ -633,12 +689,16 @@ export const createLedgerStore = (
 
     activeRunForSession: (session) => activeRunOf(session),
 
-    /** 活跃去重：同 dedup_key 且工作流仍在途 → 跳过重复建流。
-     * ⚠ ESCAPE '\' 必须与转义成对：message-id 几乎必含 `_`，漏写 ESCAPE 时
-     * `\_` 成了"字面反斜杠+任意字符"，模式永不匹配——去重整体失效（09-07 事故）。 */
+    /** Active dedup: same dedup_key and the workflow still in flight → skip
+     * creating a duplicate. ⚠ ESCAPE '\' must pair with the escaping: a
+     * message-id almost always contains `_`; without ESCAPE, `\_` becomes
+     * "literal backslash + any character", the pattern never matches — and
+     * dedup fails wholesale (09-07 incident). */
     hasActiveDedup(key: string): boolean {
-      // 收单台（0920）：queued 也是在途——同信到达时若上一封还在队里等派发，
-      // 必须算「已有在途」挡住第二张，否则队尾越排越长。
+      // Intake desk (0920): queued is also in flight — when the same message
+      // arrives while the previous one is still queued awaiting dispatch, it
+      // must count as "already in flight" to block the second one, or the
+      // queue tail keeps growing.
       const r = db.prepare(
         `SELECT 1 FROM workflows WHERE status IN (${sqlInList(DEDUP_WINDOW_STATUSES)})
          AND meta LIKE ? ESCAPE '\\' LIMIT 1`,
@@ -646,8 +706,10 @@ export const createLedgerStore = (
       return r !== undefined;
     },
 
-    /** 已摄取去重（轮询层）：同 dedup_key 存在任何非 rejected 工作流 → 这封
-     * 邮件已被处理过（含 failed），轮询不再重复拉取。重试走步骤 retry，不走再摄取。 */
+    /** Ingested dedup (polling layer): any non-rejected workflow with the same
+     * dedup_key → this email has already been handled (failed included);
+     * polling won't fetch it again. Retries go through step retry, not
+     * re-ingestion. */
     hasSeenDedup(key: string): boolean {
       const r = db.prepare(
         `SELECT 1 FROM workflows WHERE status != 'rejected'
@@ -656,11 +718,14 @@ export const createLedgerStore = (
       return r !== undefined;
     },
 
-    /** 自回环守卫查询（2026-09-20 断点十三）：message_id 是否命中本引擎已
-     * 发送记录——completed send 步的 output.message_id（email_sent 事件同源
-     * 落账）。进件层据此丢弃投递副本回灌（引擎给轮询邮箱自己发信的 echo）。
-     * LIKE 预筛 + 精确比对：JSON 编码取实际存储字节，%/_/\ 照 dedupPattern
-     * 成对转义（message-id 几乎必含 `_`）。 */
+    /** Self-loop guard query (2026-09-20 breakpoint 13): does the message_id
+     * hit a record this engine already sent — the output.message_id of a
+     * completed send step (booked from the same source as email_sent events)?
+     * The intake layer uses this to discard delivery-copy feedback (the echo
+     * of the engine mailing the polling mailbox itself). LIKE prefilter +
+     * exact comparison: JSON-encode to the actually stored bytes; %/_/\ are
+     * escaped in pairs like dedupPattern (a message-id almost always contains
+     * `_`). */
     recordSentMessageId(messageId: string, meta?: { to?: string; subject?: string }): void {
       if (messageId === '') return;
       db.prepare(
@@ -670,16 +735,18 @@ export const createLedgerStore = (
 
     sentMessageIdExists(messageId: string): boolean {
       if (messageId === '') return false;
-      // 全量出站记录：send 步（既有 LIKE 路）+ 出站登记（events 精确路，
-      // 盖通知邮件）。
+      // Full outbound record: send steps (the existing LIKE path) + outbound
+      // registration (the exact events path, covering notification emails).
       const registered = db.prepare(
         `SELECT 1 FROM events WHERE type = 'email_sent' AND entity_type = 'email' AND entity_id = ? LIMIT 1`,
       ).get(messageId);
       if (registered !== undefined) return true;
-      // LIKE 路限窗（2026-09-20 P3）：mailer seam 全量出站登记上线
-      // （2026-09-19 commit 窗）之后完成的 send 步必然已在 events 精确路——
-      // LIKE 只服务更早的历史 send 步，故按 updated_at 限窗排除新行，账本
-      // 增长不再放大这条全表扫描（自回环守卫语义不变）。
+      // LIKE path windowing (2026-09-20 P3): send steps completed after the
+      // mailer seam's full outbound registration went live (commit window of
+      // 2026-09-19) are necessarily already on the exact events path — LIKE
+      // only serves earlier historical send steps, so the updated_at window
+      // excludes new rows and ledger growth no longer amplifies this full
+      // table scan (self-loop guard semantics unchanged).
       const jsonValue = JSON.stringify(messageId).slice(1, -1);
       const pattern = `%"message_id":"${jsonValue.replace(/[%_\\]/g, (c) => `\\${c}`)}"%`;
       const rows = db.prepare(
@@ -708,19 +775,25 @@ export const createLedgerStore = (
       const all = (db.prepare('SELECT * FROM workflows ORDER BY created_at DESC, rowid DESC LIMIT ?')
         .all(limit) as Row[]).map(rowToWorkflow);
       const byId = new Map(all.map((w) => [w.id, w]));
-      // 挂链：起流声明的 related_workflow 优先，parent_id（startTask 落的
-      // 血缘列）兜底——两处同指一张任务卡，历史行可能只占其一。
+      // Chain links: the related_workflow declared at flow start takes
+      // priority, parent_id (the lineage column startTask writes) is the
+      // fallback — both point at the same task card, but historical rows may
+      // carry only one of them.
       const parentOf = (w: Workflow): string => {
         const rel = w.meta['related_workflow'];
         if (typeof rel === 'string' && rel !== '') return rel;
         return w.parentId ?? '';
       };
-      // 任务卡判据：engine.startTask 落的 mode=nodes（唯一写入方）。
+      // Task-card criterion: mode=nodes written by engine.startTask (the only writer).
       const isTaskCard = (w: Workflow): boolean => w.meta['mode'] === 'nodes';
-      // rootOf：沿链向上走到顶，取「最高的任务卡」为根；全链无任务卡 → ''
-      // （普通邮件流不属任何 Task）。带环守卫；路径上每个节点的根=各自
-      // 链段（自身→顶）的最高任务卡——祖先的链比查询点短，不能共享根
-      // （任务卡挂在邮件单下时，邮件单自己无归属），自顶向下后缀扫出。
+      // rootOf: walk up the chain to the top and take the "highest task
+      // card" as the root; a chain with no task card at all → '' (a plain
+      // email flow belongs to no Task). Cycle-guarded; each node on the path
+      // gets the root of its own chain segment (self→top), the highest task
+      // card on it — an ancestor's chain is shorter than the query point's,
+      // so roots cannot be shared (when a task card hangs under an email
+      // order, the email order itself has no attribution); computed by a
+      // top-down suffix scan.
       const rootCache = new Map<string, string>();
       const rootOf = (w: Workflow): string => {
         const cached = rootCache.get(w.id);
@@ -733,8 +806,9 @@ export const createLedgerStore = (
           if (pid === '') break;
           cur = byId.get(pid);
         }
-        // 后缀扫描：从链顶往回，「到此为止见过的最高任务卡」= 该节点的根
-        // （首个命中即定——越靠链顶越高，不被低位卡覆盖）。
+        // Suffix scan: walking back from the chain top, "the highest task
+        // card seen so far" = that node's root (the first hit wins — closer
+        // to the top means higher, never overridden by a lower card).
         let best = '';
         for (let i = path.length - 1; i >= 0; i--) {
           const p = path[i]!;
@@ -753,7 +827,7 @@ export const createLedgerStore = (
         if (arr === undefined) members.set(root, [w.id]);
         else arr.push(w.id);
       }
-      // 视图新→旧；成员列表按账本新→旧对齐（all 本身已按 created_at DESC）。
+      // Views newest → oldest; member lists follow the ledger's newest → oldest (all is already created_at DESC).
       const views: TaskView[] = [...members.entries()]
         .map(([taskId, ids]) => {
           const card = byId.get(taskId)!;

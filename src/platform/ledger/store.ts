@@ -199,6 +199,9 @@ const dedupPattern = (key: string): string => {
   return `%"dedup_key":"${jsonValue.replace(/[%_\\]/g, (c) => `\\${c}`)}"%`;
 };
 
+/** 送 Shift 停靠基位：两段顺延的临时停靠区（远超任何真实 seq，落点必空）。 */
+const SEQ_PARK_BASE = 1_000_000_000;
+
 /** sentMessageIdExists LIKE 路的时间窗（rfc3339 字符串序比较）：mailer seam
  * 全量出站登记上线（2026-09-19 commit 窗）之前的 completed send 步才走
  * LIKE——之后的出站信全部在 events 精确路。 */
@@ -245,7 +248,9 @@ const rowToEvent = (r: Row): LedgerEvent => ({
 
 const pruneImpl = (db: DatabaseSync, retentionDays: number, nowIso: string): { events: number; workflows: number } => {
   if (retentionDays <= 0) return { events: 0, workflows: 0 };
-  const cutoff = new Date(new Date(nowIso).getTime() - retentionDays * 86_400_000).toISOString();
+  // cutoff 与列同格式（rfc3339 秒级）：列由 now()/rfc3339 写入，毫秒格式的
+  // toISOString 与秒级列做字符串序比较在边界秒上口径漂移，对齐写入口径。
+  const cutoff = rfc3339(new Date(new Date(nowIso).getTime() - retentionDays * 86_400_000));
   const ev = db.prepare('DELETE FROM events WHERE ts < ?').run(cutoff);
   // 终态工作流清理（连步骤）：名单见 statuses.ts PRUNE_WORKFLOW_STATUSES
   // （failed 保留——事故语义）。
@@ -254,8 +259,19 @@ const pruneImpl = (db: DatabaseSync, retentionDays: number, nowIso: string): { e
   ).all(cutoff) as { id: string }[];
   let wfCount = 0;
   for (const r of wfRows) {
-    db.prepare('DELETE FROM workflow_steps WHERE workflow_id=?').run(r.id);
-    db.prepare('DELETE FROM workflows WHERE id=?').run(r.id);
+    // 单事务：步骤/relay/工作流三删原子，中途崩溃不留半删态；被清工作流
+    // 的 relay（含已送达）一并清——不随单清理会无限增长，孤儿 relay 还会
+    // 被 pendingRelays() 永久吐出。
+    db.exec('BEGIN');
+    try {
+      db.prepare('DELETE FROM workflow_steps WHERE workflow_id=?').run(r.id);
+      db.prepare('DELETE FROM relays WHERE workflow_id=?').run(r.id);
+      db.prepare('DELETE FROM workflows WHERE id=?').run(r.id);
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
     wfCount++;
   }
   return { events: Number(ev.changes), workflows: wfCount };
@@ -316,7 +332,7 @@ export const createLedgerStore = (
               r.status AS status, r.created_at AS created_at FROM runs r
        JOIN workflows w ON w.id = r.workflow_id
        WHERE r.session=? AND r.status IN ('running','idle') AND w.status='running'
-       ORDER BY r.created_at DESC LIMIT 1`,
+       ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`,
     ).get(session);
     if (!r) return null;
     return {
@@ -439,12 +455,20 @@ export const createLedgerStore = (
         `INSERT INTO workflow_steps (id, workflow_id, seq, kind, title, status, input, updated_at)
          VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`,
       );
-      const shift = db.prepare(
-        'UPDATE workflow_steps SET seq = seq + ? WHERE workflow_id = ? AND seq >= ?',
+      // 两段顺延（R1 P1）：单段 `seq = seq + batch` 在插入点早于既有 tail 时
+      // 必撞 UNIQUE(workflow_id, seq)（batch 落点被 tail 占着，如 4 步后插
+      // 2 步到 seq 1）。先整段 tail 挪去高位停靠区，再落回 +batch 终位——
+      // 终点在插入 batch 顶之后，永远空闲。
+      const park = db.prepare(
+        `UPDATE workflow_steps SET seq = seq + ${SEQ_PARK_BASE} WHERE workflow_id = ? AND seq >= ?`,
+      );
+      const restore = db.prepare(
+        `UPDATE workflow_steps SET seq = seq - ${SEQ_PARK_BASE} + ? WHERE workflow_id = ? AND seq >= ${SEQ_PARK_BASE}`,
       );
       db.exec('BEGIN');
       try {
-        shift.run(steps.length, workflowId, afterSeq + 1);
+        park.run(workflowId, afterSeq + 1);
+        restore.run(steps.length, workflowId);
         steps.forEach((st, i) => {
           insert.run(ids.newId('st'), workflowId, afterSeq + 1 + i, st.kind, st.title,
             JSON.stringify(st.input ?? {}), now());
@@ -494,7 +518,7 @@ export const createLedgerStore = (
     },
     pendingRelays() {
       return (db.prepare(`SELECT id, workflow_id, step_id, session, text, marker, created_at, attempts,
-          COALESCE(last_error,'') AS last_error FROM relays WHERE delivered_at IS NULL ORDER BY created_at`).all() as Row[]).map((r) => ({
+          COALESCE(last_error,'') AS last_error FROM relays WHERE delivered_at IS NULL ORDER BY created_at, rowid`).all() as Row[]).map((r) => ({
         id: str(r['id']), workflowId: str(r['workflow_id']), stepId: str(r['step_id']),
         session: str(r['session']), text: str(r['text']), marker: str(r['marker']),
         createdAt: str(r['created_at']), attempts: num(r['attempts']), lastError: str(r['last_error']),
@@ -773,7 +797,7 @@ export const createLedgerStore = (
       const placeholders = statuses.map(() => '?').join(',');
       const r = db.prepare(
         `SELECT id, run_id, content, status, created_at FROM prompts
-         WHERE run_id=? AND status IN (${placeholders}) ORDER BY created_at DESC LIMIT 1`,
+         WHERE run_id=? AND status IN (${placeholders}) ORDER BY created_at DESC, rowid DESC LIMIT 1`,
       ).get(run.id, ...statuses);
       if (!r) return null;
       return {

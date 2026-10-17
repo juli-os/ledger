@@ -353,23 +353,32 @@ const ingestFile = (db: DatabaseSync, claudeId: string, transcriptPath: string):
     if (lastNL < 0) return 0;
     const complete = text.slice(0, lastNL + 1);
     let count = 0;
-    for (const line of complete.split('\n')) {
-      if (line === '') continue;
-      const rec = parseAssistantLine(line);
-      if (!rec) continue;
-      const sess = tmuxOf(db, claudeId);
-      db.prepare(`INSERT INTO prompt_usage (source, note, model, input_tokens, output_tokens, cached_tokens, duration_ms, error, created_at, tmux_session)
-        VALUES ('claude_code', ?, ?, ?, ?, ?, 0, '', ?, ?)`).run(
-        `turn=${String(rec.callContext).slice(0, 40)}`, rec.model,
-        rec.inputTokens, rec.outputTokens, rec.cacheRead, rec.timestamp, sess,
-      );
-      count++;
-    }
     const newOffset = offset + Buffer.byteLength(complete, 'utf8');
-    db.prepare(`INSERT INTO claude_ingest_offset (claude_session_id, byte_offset, last_ingested_at)
-      VALUES (?, ?, ?)
-      ON CONFLICT(claude_session_id) DO UPDATE SET byte_offset=excluded.byte_offset, last_ingested_at=excluded.last_ingested_at`)
-      .run(claudeId, newOffset, new Date().toISOString());
+    // 单事务（R1 P2）：行插入与 offset 推进同生共死——两段自动提交之间崩溃，
+    // 重启后按旧 offset 重读已插入的行，用量双计。
+    db.exec('BEGIN');
+    try {
+      for (const line of complete.split('\n')) {
+        if (line === '') continue;
+        const rec = parseAssistantLine(line);
+        if (!rec) continue;
+        const sess = tmuxOf(db, claudeId);
+        db.prepare(`INSERT INTO prompt_usage (source, note, model, input_tokens, output_tokens, cached_tokens, duration_ms, error, created_at, tmux_session)
+          VALUES ('claude_code', ?, ?, ?, ?, ?, 0, '', ?, ?)`).run(
+          `turn=${String(rec.callContext).slice(0, 40)}`, rec.model,
+          rec.inputTokens, rec.outputTokens, rec.cacheRead, rec.timestamp, sess,
+        );
+        count++;
+      }
+      db.prepare(`INSERT INTO claude_ingest_offset (claude_session_id, byte_offset, last_ingested_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(claude_session_id) DO UPDATE SET byte_offset=excluded.byte_offset, last_ingested_at=excluded.last_ingested_at`)
+        .run(claudeId, newOffset, new Date().toISOString());
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
     return count;
   } finally {
     closeSync(fd);

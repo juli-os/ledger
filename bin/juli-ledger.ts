@@ -25,7 +25,7 @@ function demo() {
   const w1 = store.createWorkflow({ kind: 'case', title: 'Client inquiry: website redesign', meta: { from: 'client@acme.com', message_id: 'demo-001' } });
   store.createStep({ workflowId: w1.id, seq: 1, kind: 'agent', title: 'Understand the request' });
   store.createStep({ workflowId: w1.id, seq: 2, kind: 'agent', title: 'Draft a proposal' });
-  store.setWorkflowStatus(w1.id, 'awaiting_approval' as never);
+  store.setWorkflowStatus(w1.id, 'running');
   const w2 = store.createWorkflow({ kind: 'case', title: 'Monthly report automation', meta: { from: 'ops@acme.com' } });
   store.setWorkflowStatus(w2.id, 'completed' as never);
   const cf = { ...emptyCaseFile(new Date()), original: { from: 'client@acme.com', subject: 'Website redesign' } };

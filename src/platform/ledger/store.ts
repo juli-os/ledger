@@ -14,7 +14,7 @@ import type {
 } from '../../contracts/entities.ts';
 import { AGENT_STEP_KINDS, TERMINAL_WORKFLOW_STATUSES } from '../../contracts/entities.ts';
 import {
-  ACTIVE_STEP_STATUSES, DEDUP_WINDOW_STATUSES, PRUNE_WORKFLOW_STATUSES,
+  ACTIVE_STEP_STATUSES, ACTIVE_WORKFLOW_STATUSES, DEDUP_WINDOW_STATUSES, PRUNE_WORKFLOW_STATUSES,
   TERMINAL_STEP_STATUSES, sqlInList,
 } from '../../contracts/statuses.ts';
 import { parseCaseFile, serializeCaseFile, type CaseFileDoc } from './casefile.ts';
@@ -191,13 +191,15 @@ const str = (v: string | number | bigint | null | Uint8Array | undefined): strin
 const num = (v: string | number | bigint | null | Uint8Array | undefined): number =>
   typeof v === 'number' ? v : Number(v ?? 0);
 
-/** meta JSON 里的 dedup_key LIKE 模式，必须配 `ESCAPE '\'` 使用。
+/** JSON 列里 `"字段":"值"` 片段的 LIKE 模式，必须配 `ESCAPE '\'` 使用。
  * 两步：先取 JSON 实际存储字节（`"`→`\"` 等由 JSON 编码），再对 LIKE 特殊字符
  * （`\ % _`）转义——引号本身在 LIKE 里无特殊义，转义的是 JSON 加的那道反斜杠。 */
-const dedupPattern = (key: string): string => {
-  const jsonValue = JSON.stringify(key).slice(1, -1);
-  return `%"dedup_key":"${jsonValue.replace(/[%_\\]/g, (c) => `\\${c}`)}"%`;
+const jsonFieldPattern = (field: string, value: string): string => {
+  const jsonValue = JSON.stringify(value).slice(1, -1);
+  return `%"${field}":"${jsonValue.replace(/[%_\\]/g, (c) => `\\${c}`)}"%`;
 };
+/** meta JSON 里的 dedup_key LIKE 模式（hasActiveDedup/hasSeenDedup 共用）。 */
+const dedupPattern = (key: string): string => jsonFieldPattern('dedup_key', key);
 
 /** 送 Shift 停靠基位：两段顺延的临时停靠区（远超任何真实 seq，落点必空）。 */
 const SEQ_PARK_BASE = 1_000_000_000;
@@ -354,10 +356,7 @@ export const createLedgerStore = (
       return getWorkflowById(id)!;
     },
 
-    getWorkflow(id) {
-      const r = db.prepare('SELECT * FROM workflows WHERE id=?').get(id);
-      return r ? rowToWorkflow(r as Row) : null;
-    },
+    getWorkflow(id) { return getWorkflowById(id); },
 
     listWorkflows(limit = 100, status?) {
       // rowid 次序兜底：同秒创建的工作流也保持稳定的新→旧序。
@@ -480,10 +479,7 @@ export const createLedgerStore = (
       }
     },
 
-    getStep(id) {
-      const r = db.prepare(`SELECT ${STEP_COLS} FROM workflow_steps WHERE id=?`).get(id);
-      return r ? rowToStep(r as Row) : null;
-    },
+    getStep(id) { return getStepById(id); },
 
     stepsForWorkflow(id) {
       return (db.prepare(`SELECT ${STEP_COLS} FROM workflow_steps WHERE workflow_id=? ORDER BY seq`)
@@ -559,14 +555,15 @@ export const createLedgerStore = (
 
     runningAgentStepForSession(session) {
       // 主路：runs 行反查（引擎派发时必建 run）。JOIN 下列名必须限定
-      // （裸 `id` 会撞上 workflows/runs 的 id）。
-      const r = db.prepare(
-        `SELECT st.id AS id, st.workflow_id AS workflow_id, st.seq AS seq, st.kind AS kind,
+      // （裸 `id` 会撞上 workflows/runs 的 id）；两路共享同一份投影前缀。
+      const proj = `SELECT st.id AS id, st.workflow_id AS workflow_id, st.seq AS seq, st.kind AS kind,
                 COALESCE(st.title,'') AS title, st.status AS status,
                 COALESCE(st.input,'') AS input, COALESCE(st.output,'') AS output,
                 COALESCE(st.summary,'') AS summary, st.updated_at AS updated_at
          FROM workflow_steps st
-         JOIN workflows w ON w.id = st.workflow_id
+         JOIN workflows w ON w.id = st.workflow_id`;
+      const r = db.prepare(
+        `${proj}
          JOIN runs r ON r.workflow_id = st.workflow_id
          WHERE st.status='running' AND st.kind IN (${sqlInList(AGENT_STEP_KINDS)}) AND r.session=? AND w.status='running'
          ORDER BY st.updated_at DESC LIMIT 1`,
@@ -577,12 +574,7 @@ export const createLedgerStore = (
       // 干完了、引擎不知道、闸门永不打开。退回 workflow 的一等会话字段
       // （session / meta.assigned_session，与 claimedContainerFor 同源）。
       const r2 = db.prepare(
-        `SELECT st.id AS id, st.workflow_id AS workflow_id, st.seq AS seq, st.kind AS kind,
-                COALESCE(st.title,'') AS title, st.status AS status,
-                COALESCE(st.input,'') AS input, COALESCE(st.output,'') AS output,
-                COALESCE(st.summary,'') AS summary, st.updated_at AS updated_at
-         FROM workflow_steps st
-         JOIN workflows w ON w.id = st.workflow_id
+        `${proj}
          WHERE st.status='running' AND st.kind IN (${sqlInList(AGENT_STEP_KINDS)}) AND w.status='running'
            AND (w.session=? OR COALESCE(json_extract(w.meta,'$.assigned_session'),'')=?)
          ORDER BY st.updated_at DESC LIMIT 1`,
@@ -596,9 +588,12 @@ export const createLedgerStore = (
       // 造法只有 runs）。终态单被 status 过滤挡在门外，锚点宽不会误伤。
       const anchor = '(session=?1 OR COALESCE(json_extract(meta,\'$.assigned_session\'),\'\')=?1'
         + ' OR id IN (SELECT workflow_id FROM runs WHERE session=?1))';
+      // 在途单集合走 statuses.ts 名单（ACTIVE_WORKFLOW_STATUSES，与文件内
+      // 其他 SQL 同口径），不手写字面量。
+      const openFilter = `status IN (${sqlInList(ACTIVE_WORKFLOW_STATUSES)})`;
       const sql = excludeWorkflowId !== undefined && excludeWorkflowId !== ''
-        ? `SELECT COUNT(*) AS n FROM workflows WHERE status IN ('queued','running') AND ${anchor} AND id != ?2`
-        : `SELECT COUNT(*) AS n FROM workflows WHERE status IN ('queued','running') AND ${anchor}`;
+        ? `SELECT COUNT(*) AS n FROM workflows WHERE ${openFilter} AND ${anchor} AND id != ?2`
+        : `SELECT COUNT(*) AS n FROM workflows WHERE ${openFilter} AND ${anchor}`;
       const row = excludeWorkflowId !== undefined && excludeWorkflowId !== ''
         ? db.prepare(sql).get(session, excludeWorkflowId) as Row
         : db.prepare(sql).get(session) as Row;
@@ -683,7 +678,7 @@ export const createLedgerStore = (
     /** 自回环守卫查询（2026-09-20 断点十三）：message_id 是否命中本引擎已
      * 发送记录——completed send 步的 output.message_id（email_sent 事件同源
      * 落账）。进件层据此丢弃投递副本回灌（引擎给轮询邮箱自己发信的 echo）。
-     * LIKE 预筛 + 精确比对：JSON 编码取实际存储字节，%/_/\ 照 dedupPattern
+     * LIKE 预筛 + 精确比对：JSON 编码取实际存储字节，%/_/\ 照 jsonFieldPattern
      * 成对转义（message-id 几乎必含 `_`）。 */
     recordSentMessageId(messageId: string, meta?: { to?: string; subject?: string }): void {
       if (messageId === '') return;
@@ -704,8 +699,7 @@ export const createLedgerStore = (
       // （2026-09-19 commit 窗）之后完成的 send 步必然已在 events 精确路——
       // LIKE 只服务更早的历史 send 步，故按 updated_at 限窗排除新行，账本
       // 增长不再放大这条全表扫描（自回环守卫语义不变）。
-      const jsonValue = JSON.stringify(messageId).slice(1, -1);
-      const pattern = `%"message_id":"${jsonValue.replace(/[%_\\]/g, (c) => `\\${c}`)}"%`;
+      const pattern = jsonFieldPattern('message_id', messageId);
       const rows = db.prepare(
         `SELECT output FROM workflow_steps WHERE kind = 'send' AND status = 'completed'
          AND updated_at < ? AND output LIKE ? ESCAPE '\\'`,

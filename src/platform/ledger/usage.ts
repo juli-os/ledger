@@ -120,12 +120,18 @@ export interface UsageStore {
 type Row = Record<string, string | number | bigint | null | Uint8Array>;
 const n = (v: string | number | bigint | Uint8Array | null | undefined): number => typeof v === 'number' ? v : Number(v ?? 0);
 
-/** 窗口内该会话的 claude_code 行级用量（perSessionWindowsRows 与计价的公共查询）。 */
-const windowUsageRows = (db: DatabaseSync, tmuxSession: string, windows: readonly (readonly [string, string])[]): UsageRow[] => {
-  if (windows.length === 0) return [];
+/** 多窗并集 WHERE 片段与绑定参数（perSessionWindows 与行级查询共用）。 */
+const windowConds = (tmuxSession: string, windows: readonly (readonly [string, string])[]): { conds: string; params: string[] } => {
   const conds = windows.map(() => '(created_at >= ? AND created_at <= ?)').join(' OR ');
   const params = [tmuxSession];
   for (const [a, b] of windows) params.push(a, b);
+  return { conds, params };
+};
+
+/** 窗口内该会话的 claude_code 行级用量（perSessionWindowsRows 与计价的公共查询）。 */
+const windowUsageRows = (db: DatabaseSync, tmuxSession: string, windows: readonly (readonly [string, string])[]): UsageRow[] => {
+  if (windows.length === 0) return [];
+  const { conds, params } = windowConds(tmuxSession, windows);
   return (db.prepare(
     `SELECT model, input_tokens AS i, output_tokens AS o, cached_tokens AS k
      FROM prompt_usage WHERE source='claude_code' AND tmux_session=? AND (${conds})`,
@@ -197,9 +203,7 @@ export const createUsageStore = (dbPath: string, now = (): Date => new Date()): 
     },
     perSessionWindows(tmuxSession, windows) {
       if (windows.length === 0) return { count: 0, inputTokens: 0, outputTokens: 0 };
-      const conds = windows.map(() => '(created_at >= ? AND created_at <= ?)').join(' OR ');
-      const params = [tmuxSession];
-      for (const [a, b] of windows) params.push(a, b);
+      const { conds, params } = windowConds(tmuxSession, windows);
       const r = db.prepare(
         `SELECT COUNT(*) AS c, COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o
          FROM prompt_usage WHERE source='claude_code' AND tmux_session=? AND (${conds})`,
@@ -285,11 +289,6 @@ export const createUsageStore = (dbPath: string, now = (): Date => new Date()): 
     },
 
     ingestProjectTranscripts(claudeProjectsDir) {
-      // 已登记映射的 transcript 由映射路径负责（offset 按 session id 共享）。
-      const mapped = new Set<string>(
-        (db.prepare('SELECT claude_session_id FROM claude_sessions').all() as Row[])
-          .map((r) => String(r['claude_session_id'])),
-      );
       let count = 0;
       try {
         const projects = readdirSync(claudeProjectsDir);
@@ -358,11 +357,12 @@ const ingestFile = (db: DatabaseSync, claudeId: string, transcriptPath: string):
     // 重启后按旧 offset 重读已插入的行，用量双计。
     db.exec('BEGIN');
     try {
+      // 事务内 claude_sessions 不变——归属反查一次即可（原逐行重复同查）。
+      const sess = tmuxOf(db, claudeId);
       for (const line of complete.split('\n')) {
         if (line === '') continue;
         const rec = parseAssistantLine(line);
         if (!rec) continue;
-        const sess = tmuxOf(db, claudeId);
         db.prepare(`INSERT INTO prompt_usage (source, note, model, input_tokens, output_tokens, cached_tokens, duration_ms, error, created_at, tmux_session)
           VALUES ('claude_code', ?, ?, ?, ?, ?, 0, '', ?, ?)`).run(
           `turn=${String(rec.callContext).slice(0, 40)}`, rec.model,

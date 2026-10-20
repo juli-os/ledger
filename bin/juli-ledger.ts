@@ -27,7 +27,7 @@ function demo() {
   store.createStep({ workflowId: w1.id, seq: 2, kind: 'agent', title: 'Draft a proposal' });
   store.setWorkflowStatus(w1.id, 'running');
   const w2 = store.createWorkflow({ kind: 'case', title: 'Monthly report automation', meta: { from: 'ops@acme.com' } });
-  store.setWorkflowStatus(w2.id, 'completed' as never);
+  store.setWorkflowStatus(w2.id, 'completed');
   const cf = { ...emptyCaseFile(new Date()), original: { from: 'client@acme.com', subject: 'Website redesign' } };
   store.saveCaseFile(w1.id, cf);
   for (let i = 0; i < 12; i++) {

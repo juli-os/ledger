@@ -219,9 +219,10 @@ const tierOf = (price: ModelPrice, r: UsageRow): PriceTier => {
 /** API 等效计价：行级落档计价后按模型加总。tokens 为 0 的行不产生条目。 */
 export const priceUsage = (rows: readonly UsageRow[]): UsageCost => {
   interface Acc {
-    model: string; label: string; free: boolean; priced: boolean; calls: number;
+    model: string; label: string; free: boolean; calls: number;
     inputTokens: number; cachedTokens: number; outputTokens: number;
     tiersHit: Set<string>; cost: { cache: number; input: number; output: number };
+    price: ModelPrice | null;
   }
   const accs = new Map<string, Acc>();
   for (const r of rows) {
@@ -231,9 +232,9 @@ export const priceUsage = (rows: readonly UsageRow[]): UsageCost => {
     if (a === undefined) {
       const p = findPrice(key);
       a = {
-        model: key, label: p?.label ?? key, free: false, priced: p !== null, calls: 0,
+        model: key, label: p?.label ?? key, free: false, calls: 0,
         inputTokens: 0, cachedTokens: 0, outputTokens: 0, tiersHit: new Set(),
-        cost: { cache: 0, input: 0, output: 0 },
+        cost: { cache: 0, input: 0, output: 0 }, price: p,
       };
       accs.set(key, a);
     }
@@ -241,8 +242,9 @@ export const priceUsage = (rows: readonly UsageRow[]): UsageCost => {
     a.inputTokens += r.inputTokens;
     a.cachedTokens += r.cachedTokens;
     a.outputTokens += r.outputTokens;
-    if (!a.priced) continue;
-    const t = tierOf(findPrice(key)!, r);
+    const p = a.price;
+    if (p === null) continue;
+    const t = tierOf(p, r);
     a.tiersHit.add(t.note);
     if (t.input === 0 && t.output === 0) { a.free = true; continue; } // 免费档：用量照记价 0
     // cached ⊆ input（账本口径）；异常行 clamp 防负价。
@@ -253,7 +255,7 @@ export const priceUsage = (rows: readonly UsageRow[]): UsageCost => {
     a.cost.output += (r.outputTokens / 1e6) * t.output;
   }
   const byModel = [...accs.values()].map((a) => ({
-    model: a.model, label: a.label, free: a.free, priced: a.priced, calls: a.calls,
+    model: a.model, label: a.label, free: a.free, priced: a.price !== null, calls: a.calls,
     inputTokens: a.inputTokens, cachedTokens: a.cachedTokens,
     inputTokensChargeable: a.inputTokens - Math.min(a.cachedTokens, a.inputTokens),
     outputTokens: a.outputTokens, tiersHit: [...a.tiersHit],

@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  createLedgerStore, createUsageStore, emptyCaseFile, serializeCaseFile,
+  createLedgerStore, createUsageStore, emptyCaseFile, serializeCaseFile, appendReference,
 } from '../src/index.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'peel-l1-'));
@@ -34,6 +34,19 @@ test('step append + case file round-trip', () => {
   const cf = { ...emptyCaseFile(new Date()), original: { from: 'peel@test', subject: 'peel smoke case file' } };
   store.saveCaseFile(wf.id, cf);
   assert.equal(serializeCaseFile(store.loadCaseFile(wf.id)), serializeCaseFile(cf));
+});
+
+test('case file updatedAt survives save/load across time (+ Go legacy updated_at rows)', () => {
+  let now = new Date('2026-01-01T00:00:00Z');
+  const store = createLedgerStore(join(dir, 'cf-roundtrip.db'), { clock: { now: () => now } });
+  const wf = store.createWorkflow({ kind: 'case', title: 'cf roundtrip' });
+  store.saveCaseFile(wf.id, appendReference(store.loadCaseFile(wf.id), 'msg-roundtrip', now));
+  now = new Date('2026-01-09T00:00:00Z'); // 读时已过一周：落卷时间戳不得被 now 重盖
+  assert.equal(store.loadCaseFile(wf.id).updatedAt, '2026-01-01T00:00:00Z');
+  // Go 遗留行（snake_case updated_at，稀疏文档）同样可读。
+  store.db.prepare('UPDATE workflows SET case_file=? WHERE id=?')
+    .run(JSON.stringify({ decisions: [], updated_at: '2025-12-01T00:00:00Z' }), wf.id);
+  assert.equal(store.loadCaseFile(wf.id).updatedAt, '2025-12-01T00:00:00Z');
 });
 
 test('usage records + aggregates', () => {

@@ -174,7 +174,7 @@ export const createUsageStore = (dbPath: string, now = (): Date => new Date()): 
         model: String(r['model']), calls: n(r['c']), inputTokens: n(r['i']), outputTokens: n(r['o']),
       }));
       return {
-        totalCalls: n(total?.['c']), totalInputTokens: n(total?.['i']), totalOutputTokens: n(total?.['o']),
+        totalCalls: n(total['c']), totalInputTokens: n(total['i']), totalOutputTokens: n(total['o']),
         byModel,
       };
     },
@@ -214,7 +214,8 @@ export const createUsageStore = (dbPath: string, now = (): Date => new Date()): 
       return windowUsageRows(db, tmuxSession, windows);
     },
     sessionWindowsPriced(sessions, windows) {
-      if (sessions.length === 0 || windows.length === 0) return priceUsage([]);
+      // 空集已由通用路径兜住：sessions 空数 flatMap 即空，windows 空
+      // windowUsageRows 直接返回 []（不触 SQL），priceUsage([]) 结果同型。
       return priceUsage(sessions.flatMap((s) => windowUsageRows(db, s, windows)));
     },
     byLocalDay(days = 7) {
@@ -252,10 +253,20 @@ export const createUsageStore = (dbPath: string, now = (): Date => new Date()): 
       return mapped > 0 && total > 0 && filled * 2 < total;
     },
     resetClaudeIngest() {
-      db.exec('DELETE FROM prompt_usage WHERE source=\'claude_code\'');
-      db.exec('DELETE FROM claude_ingest_offset');
-      db.prepare(`INSERT INTO usage_meta (key, value) VALUES ('last_claude_replay_at', ?)
-        ON CONFLICT(key) DO UPDATE SET value=excluded.value`).run(now().toISOString());
+      // 三段同生共死（同 ingestFile 事务口径）：两段自动提交之间中断——
+      // claude_code 行已删而 offset 未清/标记未落——needsClaudeReplay 因
+      // total=0 永假，被删历史按旧 offset 永不重读（静默丢账）。
+      db.exec('BEGIN');
+      try {
+        db.exec('DELETE FROM prompt_usage WHERE source=\'claude_code\'');
+        db.exec('DELETE FROM claude_ingest_offset');
+        db.prepare(`INSERT INTO usage_meta (key, value) VALUES ('last_claude_replay_at', ?)
+          ON CONFLICT(key) DO UPDATE SET value=excluded.value`).run(now().toISOString());
+        db.exec('COMMIT');
+      } catch (e) {
+        db.exec('ROLLBACK');
+        throw e;
+      }
     },
 
     recent(limit = 100) {
@@ -306,7 +317,7 @@ export const createUsageStore = (dbPath: string, now = (): Date => new Date()): 
             // （实测归属全空根因之二）。统一走 ingestFile：行内 tmuxOf 反查，
             // 映射在场即写归属，不在场留空待补。
             const stem = f.replace(/\.jsonl$/, '');
-            count += ingestFile(db, stem, join(dir, f));
+            count += ingestFile(db, stem, join(dir, f), now);
           }
         }
       } catch {
@@ -325,7 +336,7 @@ const tmuxOf = (db: DatabaseSync, claudeId: string): string => {
   return r?.['tmux_session'] ?? '';
 };
 
-const ingestFile = (db: DatabaseSync, claudeId: string, transcriptPath: string): number => {
+const ingestFile = (db: DatabaseSync, claudeId: string, transcriptPath: string, now: () => Date): number => {
   let fd: number;
   try {
     fd = openSync(transcriptPath, 'r');
@@ -361,7 +372,7 @@ const ingestFile = (db: DatabaseSync, claudeId: string, transcriptPath: string):
       const sess = tmuxOf(db, claudeId);
       for (const line of complete.split('\n')) {
         if (line === '') continue;
-        const rec = parseAssistantLine(line);
+        const rec = parseAssistantLine(line, now);
         if (!rec) continue;
         db.prepare(`INSERT INTO prompt_usage (source, note, model, input_tokens, output_tokens, cached_tokens, duration_ms, error, created_at, tmux_session)
           VALUES ('claude_code', ?, ?, ?, ?, ?, 0, '', ?, ?)`).run(
@@ -373,7 +384,7 @@ const ingestFile = (db: DatabaseSync, claudeId: string, transcriptPath: string):
       db.prepare(`INSERT INTO claude_ingest_offset (claude_session_id, byte_offset, last_ingested_at)
         VALUES (?, ?, ?)
         ON CONFLICT(claude_session_id) DO UPDATE SET byte_offset=excluded.byte_offset, last_ingested_at=excluded.last_ingested_at`)
-        .run(claudeId, newOffset, new Date().toISOString());
+        .run(claudeId, newOffset, now().toISOString());
       db.exec('COMMIT');
     } catch (e) {
       db.exec('ROLLBACK');
@@ -396,7 +407,7 @@ interface AssistantTurn {
 
 /** 只取 assistant 类型且用量非零的行；总量把 cache 桶也算进去（缓存型供应商
  * 不算 cache read 会严重低估真实用量）。 */
-const parseAssistantLine = (line: string): AssistantTurn | null => {
+const parseAssistantLine = (line: string, now: () => Date): AssistantTurn | null => {
   try {
     const v = JSON.parse(line) as {
       type?: string; uuid?: string; timestamp?: string;
@@ -414,7 +425,7 @@ const parseAssistantLine = (line: string): AssistantTurn | null => {
     const output = u.output_tokens ?? 0;
     return {
       model: v.message?.model ?? '', inputTokens: input, outputTokens: output, cacheRead,
-      timestamp: typeof v.timestamp === 'string' ? v.timestamp : new Date().toISOString(),
+      timestamp: typeof v.timestamp === 'string' ? v.timestamp : now().toISOString(),
       callContext: v.uuid ?? '',
     };
   } catch {

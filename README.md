@@ -8,7 +8,7 @@ The L1 layer of the juli open-source ladder: **the append-only ledger of record 
 |---|---|---|
 | Workflow lifecycle | `createLedgerStore(path)` → `createWorkflow / getWorkflow / listWorkflows / setWorkflowStatus / createStep / insertStepsAt …` | Durable jobs + steps + statuses in SQLite, with dynamic mid-flight step insertion (single transaction, tail renumbered) |
 | Conversation threading | `latestByMessageId(msgId)` / `recentBySender(from, since)` | Reply-chain matching for email bots and support inboxes — message-id causal anchor + sender/time-window candidate narrowing |
-| Case files | `emptyCaseFile() / loadCaseFile / saveCaseFile` | A per-job audit dossier: original → extract → executions → draft → decisions → artifacts |
+| Case files | `emptyCaseFile(now) / loadCaseFile / saveCaseFile` | A per-job audit dossier: original → extract → executions → draft → decisions → artifacts |
 | Usage & cost | `createUsageStore(path)` → `record / stats / timeline / byLocalDay`, `priceUsage()` | Token accounting per model / day / session with built-in pricing |
 
 ## Peel boundary

@@ -48,6 +48,8 @@ test('prune: workflow goes with steps and relays; boundary second and failed sta
   const deliveredRelay = store.insertRelay({ workflowId: wfOld.id, stepId: step.id, session: 's', text: 'hi', marker: 'm' });
   store.markRelayDelivered(deliveredRelay);
   store.insertRelay({ workflowId: wfOld.id, stepId: step.id, session: 's', text: 'pending', marker: 'm2' });
+  const run = store.createRun(wfOld.id, 'sess-prune');
+  store.createPrompt(run.id, 'prune me too', 'user');
   const wfBoundary = store.createWorkflow({ kind: 'case', title: 'completed exactly at cutoff' });
   const wfFailed = store.createWorkflow({ kind: 'case', title: 'failed stays' });
   // cutoff will be 2026-01-11T00:00:00Z (prune(30) at 2026-02-10): old lands one
@@ -66,6 +68,12 @@ test('prune: workflow goes with steps and relays; boundary second and failed sta
   const relayRows = store.db.prepare('SELECT COUNT(*) AS c FROM relays WHERE workflow_id=?')
     .get(wfOld.id) as { c: number | bigint };
   assert.equal(Number(relayRows.c), 0, 'delivered relays of pruned workflow gone too');
+  const runRows = store.db.prepare('SELECT COUNT(*) AS c FROM runs WHERE workflow_id=?')
+    .get(wfOld.id) as { c: number | bigint };
+  assert.equal(Number(runRows.c), 0, 'runs of pruned workflow gone');
+  const promptRows = store.db.prepare('SELECT COUNT(*) AS c FROM prompts WHERE run_id=?')
+    .get(run.id) as { c: number | bigint };
+  assert.equal(Number(promptRows.c), 0, 'prompts of pruned run gone');
   assert.ok(store.getWorkflow(wfBoundary.id), 'row completed exactly at cutoff second is not pruned');
   assert.ok(store.getWorkflow(wfFailed.id), 'failed workflow is never pruned');
 });

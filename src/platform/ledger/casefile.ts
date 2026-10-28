@@ -79,7 +79,9 @@ export const parseCaseFile = (raw: string | null, now: Date): CaseFileDoc => {
     decisions: pick<CaseDecision>(arr('decisions'), (d) => 'action' in d),
     references: arr('references').filter((x): x is string => typeof x === 'string'),
     artifacts: pick<ArtifactRef>(arr('artifacts'), (a) => 'id' in a),
-    updatedAt: str('updated_at') || base.updatedAt,
+    // 本包 serialize 写 updatedAt；Go 遗留行是 updated_at——先新后旧，
+    // 往返不再被读时 now 覆盖。
+    updatedAt: str('updatedAt') || str('updated_at') || base.updatedAt,
   };
 };
 
@@ -136,7 +138,7 @@ export const appendReference = (cf: CaseFileDoc, messageId: string, now: Date): 
   updatedAt: rfc3339(now),
 });
 
-/** 原始邮件三元组的读取视图。 */
+/** 原始邮件字段（from/subject/body/message_id）的读取视图。 */
 export const originalEmail = (cf: CaseFileDoc): { from: string; subject: string; body: string; messageId: string } => ({
   from: cf.original['from'] ?? '',
   subject: cf.original['subject'] ?? '',

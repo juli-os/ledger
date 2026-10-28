@@ -1,8 +1,9 @@
 // L1 ledger layer facade — the only public surface of this layer.
-// This is the COMPLETE export surface of the four source modules:
-// any name exportable from platform/ledger/{store,usage,pricing,casefile}
-// is re-exported here. Dependency rule: only inward deps (shared/contracts);
-// consumers must never bypass this facade to reach internal files.
+// This is the COMPLETE export surface of every source module: any name
+// exportable from platform/ledger/{store,usage,pricing,casefile},
+// contracts/entities, or platform/shared/{clock,json} is re-exported here.
+// Dependency rule: only inward deps (shared/contracts); consumers must never
+// bypass this facade to reach internal files.
 export { createLedgerStore, type LifecycleStore } from './platform/ledger/store.ts';
 export type { Workflow, Step, WorkflowStatus, StepStatus, StepKind } from './contracts/entities.ts';
 // 0.1.3: complete the entities surface — kind capability sets + ledger companion

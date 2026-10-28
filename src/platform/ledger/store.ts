@@ -218,7 +218,7 @@ const rowToWorkflow = (r: Row): Workflow => ({
   session: str(r['session']),
   project: str(r['project']),
   path: str(r['path']),
-  threadId: r['thread_id'] === null || r['thread_id'] === undefined ? null : str(r['thread_id']),
+  threadId: r['thread_id'] === null ? null : str(r['thread_id']),
   meta: asRecord(safeParse(str(r['meta']))),
   createdAt: str(r['created_at']),
   updatedAt: str(r['updated_at']),
@@ -261,13 +261,16 @@ const pruneImpl = (db: DatabaseSync, retentionDays: number, nowIso: string): { e
   ).all(cutoff) as { id: string }[];
   let wfCount = 0;
   for (const r of wfRows) {
-    // 单事务：步骤/relay/工作流三删原子，中途崩溃不留半删态；被清工作流
-    // 的 relay（含已送达）一并清——不随单清理会无限增长，孤儿 relay 还会
-    // 被 pendingRelays() 永久吐出。
+    // 单事务：被清工作流的依赖行连删原子，中途崩溃不留半删态。随单清理
+    // 不止 relay：runs/prompts 同样随派发无限增长，且孤儿 run 还会垫厚
+    // sessionHasOpenWork 的 idx_runs_session 子查询面（孤儿 relay 更会被
+    // pendingRelays() 永久吐出）。
     db.exec('BEGIN');
     try {
       db.prepare('DELETE FROM workflow_steps WHERE workflow_id=?').run(r.id);
       db.prepare('DELETE FROM relays WHERE workflow_id=?').run(r.id);
+      db.prepare('DELETE FROM prompts WHERE run_id IN (SELECT id FROM runs WHERE workflow_id=?)').run(r.id);
+      db.prepare('DELETE FROM runs WHERE workflow_id=?').run(r.id);
       db.prepare('DELETE FROM workflows WHERE id=?').run(r.id);
       db.exec('COMMIT');
     } catch (e) {
@@ -331,7 +334,7 @@ export const createLedgerStore = (
   const activeRunOf = (session: string): Run | null => {
     const r = db.prepare(
       `SELECT r.id AS id, r.workflow_id AS workflow_id, r.session AS session,
-              r.status AS status, r.created_at AS created_at FROM runs r
+              r.created_at AS created_at FROM runs r
        JOIN workflows w ON w.id = r.workflow_id
        WHERE r.session=? AND r.status IN ('running','idle') AND w.status='running'
        ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`,
@@ -591,12 +594,11 @@ export const createLedgerStore = (
       // 在途单集合走 statuses.ts 名单（ACTIVE_WORKFLOW_STATUSES，与文件内
       // 其他 SQL 同口径），不手写字面量。
       const openFilter = `status IN (${sqlInList(ACTIVE_WORKFLOW_STATUSES)})`;
-      const sql = excludeWorkflowId !== undefined && excludeWorkflowId !== ''
-        ? `SELECT COUNT(*) AS n FROM workflows WHERE ${openFilter} AND ${anchor} AND id != ?2`
-        : `SELECT COUNT(*) AS n FROM workflows WHERE ${openFilter} AND ${anchor}`;
-      const row = excludeWorkflowId !== undefined && excludeWorkflowId !== ''
-        ? db.prepare(sql).get(session, excludeWorkflowId) as Row
-        : db.prepare(sql).get(session) as Row;
+      const exclude = excludeWorkflowId !== undefined && excludeWorkflowId !== '';
+      const sql = `SELECT COUNT(*) AS n FROM workflows WHERE ${openFilter} AND ${anchor}${exclude ? ' AND id != ?2' : ''}`;
+      const row = (exclude
+        ? db.prepare(sql).get(session, excludeWorkflowId)
+        : db.prepare(sql).get(session)) as Row;
       return Number(row['n']) > 0;
     },
 
@@ -643,10 +645,11 @@ export const createLedgerStore = (
 
     createRun(workflowId, session) {
       const id = ids.newId('run');
+      const ts = now();
       db.prepare(`INSERT INTO runs (id, workflow_id, session, status, created_at)
-        VALUES (?, ?, ?, 'running', ?)`).run(id, workflowId, session, now());
+        VALUES (?, ?, ?, 'running', ?)`).run(id, workflowId, session, ts);
       return {
-        id, workflowId, session, status: 'running' as const, createdAt: now(),
+        id, workflowId, session, status: 'running' as const, createdAt: ts,
       };
     },
 
@@ -675,11 +678,9 @@ export const createLedgerStore = (
       return r !== undefined;
     },
 
-    /** 自回环守卫查询（2026-09-20 断点十三）：message_id 是否命中本引擎已
-     * 发送记录——completed send 步的 output.message_id（email_sent 事件同源
-     * 落账）。进件层据此丢弃投递副本回灌（引擎给轮询邮箱自己发信的 echo）。
-     * LIKE 预筛 + 精确比对：JSON 编码取实际存储字节，%/_/\ 照 jsonFieldPattern
-     * 成对转义（message-id 几乎必含 `_`）。 */
+    /** 全量出站邮件登记（2026-09-20 幽灵单缺口）：send 步之外，通知邮件
+     * （emailNotifier）等所有出站信的 message_id 也落 email_sent 事件——
+     * 发给轮询邮箱自身的告警信不再被当新来信建单（[juli] 待审批 幽灵单）。 */
     recordSentMessageId(messageId: string, meta?: { to?: string; subject?: string }): void {
       if (messageId === '') return;
       db.prepare(
@@ -687,6 +688,11 @@ export const createLedgerStore = (
       ).run(messageId, JSON.stringify(meta ?? {}), now());
     },
 
+    /** 自回环守卫查询（2026-09-20 断点十三）：message_id 是否命中本引擎已
+     * 发送记录——completed send 步的 output.message_id（email_sent 事件同源
+     * 落账）。进件层据此丢弃投递副本回灌（引擎给轮询邮箱自己发信的 echo）。
+     * LIKE 预筛 + 精确比对：JSON 编码取实际存储字节，%/_/\ 照 jsonFieldPattern
+     * 成对转义（message-id 几乎必含 `_`）。 */
     sentMessageIdExists(messageId: string): boolean {
       if (messageId === '') return false;
       // 全量出站记录：send 步（既有 LIKE 路）+ 出站登记（events 精确路，
@@ -713,9 +719,10 @@ export const createLedgerStore = (
 
     createPrompt(runId, content, source) {
       const id = ids.newId('pr');
+      const ts = now();
       db.prepare(`INSERT INTO prompts (id, run_id, content, source, status, created_at)
-        VALUES (?, ?, ?, ?, 'submitted', ?)`).run(id, runId, content, source, now());
-      return { id, runId, content, status: 'submitted' as const, createdAt: now() };
+        VALUES (?, ?, ?, ?, 'submitted', ?)`).run(id, runId, content, source, ts);
+      return { id, runId, content, status: 'submitted' as const, createdAt: ts };
     },
 
     prune(retentionDays: number) {
@@ -773,9 +780,9 @@ export const createLedgerStore = (
       }
       // 视图新→旧；成员列表按账本新→旧对齐（all 本身已按 created_at DESC）。
       const views: TaskView[] = [...members.entries()]
-        .map(([taskId, ids]) => {
+        .map(([taskId, memberIds]) => {
           const card = byId.get(taskId)!;
-          return { taskId, title: card.title, status: card.status, workflowIds: ids };
+          return { taskId, title: card.title, status: card.status, workflowIds: memberIds };
         })
         .sort((a, b) => {
           const ca = byId.get(a.taskId)?.createdAt ?? '';

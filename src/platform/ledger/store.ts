@@ -92,11 +92,14 @@ CREATE INDEX IF NOT EXISTS idx_runs_session ON runs(session, status);
 export interface LifecycleStore {
   readonly db: DatabaseSync;
   // workflows
-  createWorkflow(w: { kind: string; title: string; meta?: JsonRecord; parentId?: string; status?: WorkflowStatus; owner?: string }): Workflow;
+  createWorkflow(w: { kind: string; title: string; meta?: JsonRecord; parentId?: string; status?: WorkflowStatus; owner?: string; tenant?: string }): Workflow;
   getWorkflow(id: string): Workflow | null;
-  listWorkflows(limit?: number, status?: string): readonly Workflow[];
+  listWorkflows(limit?: number, status?: string, tenant?: string): readonly Workflow[];
   setWorkflowStatus(id: string, status: WorkflowStatus): void;
   setWorkflowSession(id: string, session: string): void;
+  /** 租户改派（L1 多租户地基）：幂等——现值相同即 no-op（不写库、不发
+   * 事件），不同才 UPDATE 并落一条 tenant_changed 事件。 */
+  setWorkflowTenant(id: string, tenant: string): void;
   updateWorkflowMeta(id: string, patch: JsonRecord): JsonRecord;
   setWorkflowRouting(id: string, session: string, project: string): void;
   // 对话（Thread）建档与匹配查询：engine 只调方法，SQL 留在本层。
@@ -136,7 +139,7 @@ export interface LifecycleStore {
   appendStepOutputItem(id: string, key: string, entry: JsonValue, cap: number): void;
   /** 原子 CAS：running→completed。返回 false = 已被其他路径结算（settle-once）。 */
   claimRunningStep(id: string): boolean;
-  listSteps(status: StepStatus, limit?: number): readonly Step[];
+  listSteps(status: StepStatus, limit?: number, tenant?: string): readonly Step[];
   runningAgentStepForSession(session: string): Step | null;
   /** 忙闲谓词（2026-09-30 用户裁定重定义）：忙 = 名下存在非终态单——排队/
    * 在跑/停在闸门等批准都算；唯一闲 = 名下单子全部终态。锚定与
@@ -219,6 +222,9 @@ const rowToWorkflow = (r: Row): Workflow => ({
   project: str(r['project']),
   path: str(r['path']),
   threadId: r['thread_id'] === null ? null : str(r['thread_id']),
+  // 缺省 internal：列是 NOT NULL DEFAULT，正常读出的都有值；兜底覆盖任何
+  // 未经迁移路径读到的行（租户地基保证旧行永不读到空租户）。
+  tenant: str(r['tenant']) || 'internal',
   meta: asRecord(safeParse(str(r['meta']))),
   createdAt: str(r['created_at']),
   updatedAt: str(r['updated_at']),
@@ -305,8 +311,14 @@ export const createLedgerStore = (
   if (!wfCols.includes('thread_id')) {
     db.exec('ALTER TABLE workflows ADD COLUMN thread_id TEXT');
   }
-  // 索引必须在加列之后建：MIGRATIONS 段跑在建表时，thread_id 还不存在。
+  // 租户列（L1 多租户地基 2026-11-08）：desktop 按 internal/reflex 两租户隔离。
+  // NOT NULL DEFAULT 'internal' 让旧库升级零回填——存量行读出即 internal。
+  if (!wfCols.includes('tenant')) {
+    db.exec("ALTER TABLE workflows ADD COLUMN tenant TEXT NOT NULL DEFAULT 'internal'");
+  }
+  // 索引必须在加列之后建：MIGRATIONS 段跑在建表时，thread_id/tenant 还不存在。
   db.exec('CREATE INDEX IF NOT EXISTS idx_workflows_thread ON workflows(thread_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_workflows_tenant ON workflows(tenant, created_at)');
   // 步骤时序（started/completed）：存量库补列——节点时序此前只能靠事件流
   // 重放（goShape 自认 created_at 是假的）；列允许 NULL 兼容历史行。
   const stepCols = (db.prepare("PRAGMA table_info(workflow_steps)").all() as { name: string }[]).map((c) => c.name);
@@ -353,24 +365,45 @@ export const createLedgerStore = (
       const id = ids.newId('wf');
       const ts = now();
       db.prepare(
-        `INSERT INTO workflows (id, parent_id, kind, title, status, owner, meta, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(id, w.parentId ?? null, w.kind, w.title, w.status ?? 'running', w.owner ?? null, JSON.stringify(w.meta ?? {}), ts, ts);
+        `INSERT INTO workflows (id, parent_id, kind, title, status, owner, tenant, meta, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(id, w.parentId ?? null, w.kind, w.title, w.status ?? 'running', w.owner ?? null, w.tenant ?? 'internal', JSON.stringify(w.meta ?? {}), ts, ts);
       return getWorkflowById(id)!;
     },
 
     getWorkflow(id) { return getWorkflowById(id); },
 
-    listWorkflows(limit = 100, status?) {
+    listWorkflows(limit = 100, status?, tenant?) {
       // rowid 次序兜底：同秒创建的工作流也保持稳定的新→旧序。
       // status 等值过滤（NEW-2）：在窗口之前收窄——否则长跑 running 单会被
       // 新建单挤出 LIMIT 窗（CLI 转派的会话→案卷查找正是这个形态）。
+      // tenant 等值过滤（L1 多租户地基）：与 status 同窗收窄，走
+      // idx_workflows_tenant；不传时行为与既有签名完全一致。
+      const where: string[] = [];
+      const params: (string | number)[] = [];
       if (status !== undefined && status !== '') {
-        return (db.prepare('SELECT * FROM workflows WHERE status=? ORDER BY created_at DESC, rowid DESC LIMIT ?')
-          .all(status, limit) as Row[]).map(rowToWorkflow);
+        where.push('status=?');
+        params.push(status);
       }
-      return (db.prepare('SELECT * FROM workflows ORDER BY created_at DESC, rowid DESC LIMIT ?')
-        .all(limit) as Row[]).map(rowToWorkflow);
+      if (tenant !== undefined && tenant !== '') {
+        where.push('tenant=?');
+        params.push(tenant);
+      }
+      const sql = where.length > 0
+        ? `SELECT * FROM workflows WHERE ${where.join(' AND ')} ORDER BY created_at DESC, rowid DESC LIMIT ?`
+        : 'SELECT * FROM workflows ORDER BY created_at DESC, rowid DESC LIMIT ?';
+      return (db.prepare(sql).all(...params, limit) as Row[]).map(rowToWorkflow);
+    },
+
+    setWorkflowTenant(id, tenant) {
+      // 先读现值：相同即 no-op（不写库、不发事件）——幂等由读守卫保证，
+      // 重放/重试同一改派不会刷 updated_at 也不会堆事件。
+      const cur = getWorkflowById(id);
+      if (cur === null || cur.tenant === tenant) return;
+      db.prepare('UPDATE workflows SET tenant=?, updated_at=? WHERE id=?').run(tenant, now(), id);
+      db.prepare(
+        "INSERT INTO events (entity_type, entity_id, type, payload, ts) VALUES ('workflow', ?, 'tenant_changed', ?, ?)",
+      ).run(id, JSON.stringify({ from: cur.tenant, to: tenant }), now());
     },
 
     setWorkflowSession(id, session) {
@@ -550,7 +583,21 @@ export const createLedgerStore = (
       return Number(res.changes) === 1;
     },
 
-    listSteps(status, limit = 100) {
+    listSteps(status, limit = 100, tenant?) {
+      // 租户过滤（L1 多租户地基）：steps 表无租户列，经 workflow_id 关联
+      // workflows 过滤。JOIN 分支单独写限定列名——STEP_COLS 的裸列名在两表
+      // 都有 id/workflow_id 时会歧义。不传 tenant 时与既有签名行为一致。
+      if (tenant !== undefined && tenant !== '') {
+        return (db.prepare(
+          `SELECT st.id AS id, st.workflow_id AS workflow_id, st.seq AS seq, st.kind AS kind,
+                  st.title AS title, st.status AS status,
+                  COALESCE(st.input,'') AS input, COALESCE(st.output,'') AS output,
+                  COALESCE(st.summary,'') AS summary, st.updated_at AS updated_at,
+                  st.started_at AS started_at, st.completed_at AS completed_at
+           FROM workflow_steps st JOIN workflows w ON w.id = st.workflow_id
+           WHERE st.status=? AND w.tenant=? ORDER BY st.updated_at DESC LIMIT ?`,
+        ).all(status, tenant, limit) as Row[]).map(rowToStep);
+      }
       return (db.prepare(
         `SELECT ${STEP_COLS} FROM workflow_steps WHERE status=? ORDER BY updated_at DESC LIMIT ?`,
       ).all(status, limit) as Row[]).map(rowToStep);

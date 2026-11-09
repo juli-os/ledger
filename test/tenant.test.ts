@@ -162,6 +162,34 @@ test('old DB: setWorkflowTenant migrates a legacy row, filters split the 354-sty
   assert.equal(store.entityEvents('workflow', 'wf_bulk_0', 'tenant_changed').length, 1);
 });
 
+// 空串不是合法租户（2026-11-09 修复回归）：入口归一为 internal，非法态不可
+// 表达——否则行对 internal/reflex 过滤都不可见，且幂等守卫拿映射后的值比较。
+test('setWorkflowTenant normalizes empty string to internal: filter-visible and idempotent', () => {
+  let now = new Date('2026-11-08T00:00:00Z');
+  const store = createLedgerStore(join(dir, 'set-tenant-empty.db'), { clock: { now: () => now } });
+  const wf = store.createWorkflow({ kind: 'case', title: 'empty tenant set' });
+  now = new Date('2026-11-08T00:01:00Z');
+  store.setWorkflowTenant(wf.id, '');
+  assert.equal(store.getWorkflow(wf.id)!.tenant, 'internal', "'' normalizes to internal");
+  assert.equal(store.entityEvents('workflow', wf.id, 'tenant_changed').length, 0, "'' -> internal emits no event");
+  // 行建档即 internal，归一后的空串改派是纯 no-op：不刷 updated_at。
+  assert.equal(store.getWorkflow(wf.id)!.updatedAt, '2026-11-08T00:00:00Z', 'no-op does not touch the row');
+  const internalOnly = store.listWorkflows(100, undefined, 'internal');
+  assert.deepEqual(internalOnly.map((w) => w.id), [wf.id], 'row is visible under the internal filter');
+  // 归一后再来一次空串：已是 internal，仍零事件、不动行。
+  now = new Date('2026-11-08T00:02:00Z');
+  store.setWorkflowTenant(wf.id, '');
+  assert.equal(store.getWorkflow(wf.id)!.updatedAt, '2026-11-08T00:00:00Z', 'second call is a no-op');
+  assert.equal(store.entityEvents('workflow', wf.id, 'tenant_changed').length, 0, 'still zero events');
+});
+
+test('createWorkflow with empty tenant string stores internal', () => {
+  const store = createLedgerStore(join(dir, 'create-empty-tenant.db'));
+  const wf = store.createWorkflow({ kind: 'case', title: 'empty tenant at create', tenant: '' });
+  assert.equal(wf.tenant, 'internal', "'' tenant normalizes at the entry");
+  assert.equal(store.getWorkflow(wf.id)!.tenant, 'internal', 'round trip keeps internal');
+});
+
 test('cleanup temp dir', () => {
   rmSync(dir, { recursive: true, force: true });
 });

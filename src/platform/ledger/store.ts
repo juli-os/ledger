@@ -364,10 +364,12 @@ export const createLedgerStore = (
     createWorkflow(w) {
       const id = ids.newId('wf');
       const ts = now();
+      // tenant 入口归一（|| 兼空串）：空串不是合法租户——不归一的话原始行存
+      // ''，读兜底把它映射成 internal，行对 internal/reflex 过滤都不可见。
       db.prepare(
         `INSERT INTO workflows (id, parent_id, kind, title, status, owner, tenant, meta, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(id, w.parentId ?? null, w.kind, w.title, w.status ?? 'running', w.owner ?? null, w.tenant ?? 'internal', JSON.stringify(w.meta ?? {}), ts, ts);
+      ).run(id, w.parentId ?? null, w.kind, w.title, w.status ?? 'running', w.owner ?? null, w.tenant || 'internal', JSON.stringify(w.meta ?? {}), ts, ts);
       return getWorkflowById(id)!;
     },
 
@@ -396,14 +398,18 @@ export const createLedgerStore = (
     },
 
     setWorkflowTenant(id, tenant) {
+      // 空串入口归一：先归一再比较，守卫与写入用的都是归一后的值——否则
+      // 原始行存 ''（对任何租户过滤不可见），且同值守卫拿读兜底映射后的值
+      // 比较，'' 行永远停在 ''、后续真改派被判 no-op。
+      const next = tenant === '' ? 'internal' : tenant;
       // 先读现值：相同即 no-op（不写库、不发事件）——幂等由读守卫保证，
       // 重放/重试同一改派不会刷 updated_at 也不会堆事件。
       const cur = getWorkflowById(id);
-      if (cur === null || cur.tenant === tenant) return;
-      db.prepare('UPDATE workflows SET tenant=?, updated_at=? WHERE id=?').run(tenant, now(), id);
+      if (cur === null || cur.tenant === next) return;
+      db.prepare('UPDATE workflows SET tenant=?, updated_at=? WHERE id=?').run(next, now(), id);
       db.prepare(
         "INSERT INTO events (entity_type, entity_id, type, payload, ts) VALUES ('workflow', ?, 'tenant_changed', ?, ?)",
-      ).run(id, JSON.stringify({ from: cur.tenant, to: tenant }), now());
+      ).run(id, JSON.stringify({ from: cur.tenant, to: next }), now());
     },
 
     setWorkflowSession(id, session) {

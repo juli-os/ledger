@@ -42,6 +42,10 @@ export interface Workflow {
   /** 对话（Thread）一等建模：同一线邮件往来共享的线程 id。null = 建档前
    * 的历史行或非邮件单。线程根 = 首封邮件自己的 workflow id。 */
   readonly threadId: string | null;
+  /** 租户（多租户地基 2026-11-08）：desktop 按 internal（橘粒科技）与
+   * reflex（瑞福莱）两租户隔离数据。NOT NULL DEFAULT 'internal'——旧库
+   * 升级零回填，存量行读出即 internal。 */
+  readonly tenant: string;
   readonly meta: JsonRecord;
   readonly createdAt: string;
   readonly updatedAt: string;

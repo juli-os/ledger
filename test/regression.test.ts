@@ -7,11 +7,14 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createLedgerStore, createUsageStore } from '../src/index.ts';
+import { DatabaseSync } from 'node:sqlite';
 
 const dir = mkdtempSync(join(tmpdir(), 'peel-l1-reg-'));
 
 test('insertStepsAt before an existing tail: no throw, ordering + tail data preserved', () => {
   const store = createLedgerStore(join(dir, 'insert-tail.db'));
+  // 白盒对账走第二连接（0.5.0 句柄私有）
+  const probe = new DatabaseSync(join(dir, 'insert-tail.db'));
   const wf = store.createWorkflow({ kind: 'case', title: 'insert before tail' });
   for (let i = 1; i <= 4; i++) {
     store.createStep({ workflowId: wf.id, seq: i, kind: 'agent' as never, title: `old ${i}`, input: { n: i } });
@@ -43,6 +46,7 @@ test('insertStepsAt before an existing tail: no throw, ordering + tail data pres
 test('prune: workflow goes with steps and relays; boundary second and failed stay', () => {
   let now = new Date('2026-01-01T00:00:00Z');
   const store = createLedgerStore(join(dir, 'prune.db'), { clock: { now: () => now } });
+  const pruneProbe = new DatabaseSync(join(dir, 'prune.db'));
   const wfOld = store.createWorkflow({ kind: 'case', title: 'prune me' });
   const step = store.createStep({ workflowId: wfOld.id, seq: 1, kind: 'agent' as never, title: 's1' });
   const deliveredRelay = store.insertRelay({ workflowId: wfOld.id, stepId: step.id, session: 's', text: 'hi', marker: 'm' });
@@ -65,13 +69,13 @@ test('prune: workflow goes with steps and relays; boundary second and failed sta
   assert.equal(store.getWorkflow(wfOld.id), null, 'old terminal workflow pruned');
   assert.equal(store.stepsForWorkflow(wfOld.id).length, 0, 'steps pruned with workflow');
   assert.equal(store.pendingRelays().length, 0, 'pending relays of pruned workflow gone');
-  const relayRows = store.db.prepare('SELECT COUNT(*) AS c FROM relays WHERE workflow_id=?')
+  const relayRows = pruneProbe.prepare('SELECT COUNT(*) AS c FROM relays WHERE workflow_id=?')
     .get(wfOld.id) as { c: number | bigint };
   assert.equal(Number(relayRows.c), 0, 'delivered relays of pruned workflow gone too');
-  const runRows = store.db.prepare('SELECT COUNT(*) AS c FROM runs WHERE workflow_id=?')
+  const runRows = pruneProbe.prepare('SELECT COUNT(*) AS c FROM runs WHERE workflow_id=?')
     .get(wfOld.id) as { c: number | bigint };
   assert.equal(Number(runRows.c), 0, 'runs of pruned workflow gone');
-  const promptRows = store.db.prepare('SELECT COUNT(*) AS c FROM prompts WHERE run_id=?')
+  const promptRows = pruneProbe.prepare('SELECT COUNT(*) AS c FROM prompts WHERE run_id=?')
     .get(run.id) as { c: number | bigint };
   assert.equal(Number(promptRows.c), 0, 'prompts of pruned run gone');
   assert.ok(store.getWorkflow(wfBoundary.id), 'row completed exactly at cutoff second is not pruned');

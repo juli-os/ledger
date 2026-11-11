@@ -50,14 +50,16 @@ test('old DB without tenant column upgrades on open: rows read internal', () => 
     { id: 'wf_old_b', title: 'legacy b' },
   ]);
   const store = createLedgerStore(path);
+  // 白盒对账走第二连接（0.5.0 句柄私有）
+  const probe = new DatabaseSync(path);
   assert.equal(store.getWorkflow('wf_old_a')!.tenant, 'internal', 'legacy row maps to internal');
   assert.equal(store.getWorkflow('wf_old_b')!.tenant, 'internal');
   assert.equal(store.listWorkflows(100).every((w) => w.tenant === 'internal'), true);
   // 列与索引各恰好一份（CREATE IF NOT EXISTS + PRAGMA 守卫不重复加）。
-  const tenantCols = (store.db.prepare('PRAGMA table_info(workflows)').all() as { name: string }[])
+  const tenantCols = (probe.prepare('PRAGMA table_info(workflows)').all() as { name: string }[])
     .filter((c) => c.name === 'tenant');
   assert.equal(tenantCols.length, 1, 'tenant column added exactly once');
-  const idx = store.db.prepare(
+  const idx = probe.prepare(
     "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_workflows_tenant'",
   ).all();
   assert.equal(idx.length, 1, 'idx_workflows_tenant created exactly once');
@@ -68,10 +70,12 @@ test('reopen the same DB: no duplicate column, no duplicate index', () => {
   buildOldDb(path, [{ id: 'wf_reopen', title: 'reopen me' }]);
   createLedgerStore(path);
   const store = createLedgerStore(path);
-  const tenantCols = (store.db.prepare('PRAGMA table_info(workflows)').all() as { name: string }[])
+  // 白盒对账走第二连接（0.5.0 句柄私有）
+  const probe = new DatabaseSync(path);
+  const tenantCols = (probe.prepare('PRAGMA table_info(workflows)').all() as { name: string }[])
     .filter((c) => c.name === 'tenant');
   assert.equal(tenantCols.length, 1, 'second open must not re-add tenant');
-  const idx = store.db.prepare(
+  const idx = probe.prepare(
     "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_workflows_tenant'",
   ).all();
   assert.equal(idx.length, 1, 'second open must not re-create the tenant index');
@@ -152,6 +156,8 @@ test('old DB: setWorkflowTenant migrates a legacy row, filters split the 354-sty
   const rows = Array.from({ length: 5 }, (_, i) => ({ id: `wf_bulk_${i}`, title: `bulk ${i}` }));
   buildOldDb(path, rows);
   const store = createLedgerStore(path);
+  // 白盒对账走第二连接（0.5.0 句柄私有）
+  const probe = new DatabaseSync(path);
   store.setWorkflowTenant('wf_bulk_0', 'reflex');
   assert.equal(store.getWorkflow('wf_bulk_0')!.tenant, 'reflex');
   const reflex = store.listWorkflows(100, undefined, 'reflex');

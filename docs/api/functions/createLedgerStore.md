@@ -8,7 +8,7 @@
 
 > **createLedgerStore**(`dbPath`, `deps?`): [`LifecycleStore`](../interfaces/LifecycleStore.md)
 
-Defined in: [platform/ledger/store.ts:321](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/store.ts#L321)
+Defined in: [platform/ledger/store.ts:378](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/store.ts#L378)
 
 ## Parameters
 

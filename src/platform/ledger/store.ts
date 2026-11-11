@@ -157,7 +157,6 @@ export interface WorkflowDigest {
 }
 
 export interface LifecycleStore {
-  readonly db: DatabaseSync;
   // workflows
   createWorkflow(w: { kind: string; title: string; meta?: JsonRecord; parentId?: string; status?: WorkflowStatus; owner?: string; tenant?: string }): Workflow;
   getWorkflow(id: string): Workflow | null;
@@ -419,8 +418,6 @@ export const createLedgerStore = (
   };
 
   return {
-    db,
-
     createWorkflow(w) {
       const id = ids.newId('wf');
       const ts = now();

@@ -10,6 +10,7 @@
 - [CaseDecision](interfaces/CaseDecision.md)
 - [CaseFileDoc](interfaces/CaseFileDoc.md)
 - [CostBreakdown](interfaces/CostBreakdown.md)
+- [FailedStepRow](interfaces/FailedStepRow.md)
 - [LedgerEvent](interfaces/LedgerEvent.md)
 - [LifecycleStore](interfaces/LifecycleStore.md)
 - [ModelPrice](interfaces/ModelPrice.md)
@@ -18,6 +19,7 @@
 - [Prompt](interfaces/Prompt.md)
 - [Run](interfaces/Run.md)
 - [Step](interfaces/Step.md)
+- [StepWithWorkflow](interfaces/StepWithWorkflow.md)
 - [TaskView](interfaces/TaskView.md)
 - [TierWhen](interfaces/TierWhen.md)
 - [TimelinePoint](interfaces/TimelinePoint.md)
@@ -27,6 +29,9 @@
 - [UsageStats](interfaces/UsageStats.md)
 - [UsageStore](interfaces/UsageStore.md)
 - [Workflow](interfaces/Workflow.md)
+- [WorkflowDigest](interfaces/WorkflowDigest.md)
+- [WorkflowStats](interfaces/WorkflowStats.md)
+- [WorkflowWithWaiting](interfaces/WorkflowWithWaiting.md)
 
 ## Type Aliases
 

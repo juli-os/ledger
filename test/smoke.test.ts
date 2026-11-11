@@ -4,6 +4,7 @@
 // full juli system, the ledger layer remains fully usable.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,6 +14,8 @@ import {
 
 const dir = mkdtempSync(join(tmpdir(), 'peel-l1-'));
 const store = createLedgerStore(join(dir, 'ledger.db'));
+// 白盒对账走第二连接（0.5.0 句柄私有，store 不再暴露 db）
+const probe = new DatabaseSync(join(dir, 'ledger.db'));
 const usage = createUsageStore(join(dir, 'usage.db'));
 
 test('workflow lifecycle: create -> read back -> status transition', () => {
@@ -39,12 +42,13 @@ test('step append + case file round-trip', () => {
 test('case file updatedAt survives save/load across time (+ Go legacy updated_at rows)', () => {
   let now = new Date('2026-01-01T00:00:00Z');
   const store = createLedgerStore(join(dir, 'cf-roundtrip.db'), { clock: { now: () => now } });
+  const cfProbe = new DatabaseSync(join(dir, 'cf-roundtrip.db'));
   const wf = store.createWorkflow({ kind: 'case', title: 'cf roundtrip' });
   store.saveCaseFile(wf.id, appendReference(store.loadCaseFile(wf.id), 'msg-roundtrip', now));
   now = new Date('2026-01-09T00:00:00Z'); // 读时已过一周：落卷时间戳不得被 now 重盖
   assert.equal(store.loadCaseFile(wf.id).updatedAt, '2026-01-01T00:00:00Z');
   // Go 遗留行（snake_case updated_at，稀疏文档）同样可读。
-  store.db.prepare('UPDATE workflows SET case_file=? WHERE id=?')
+  cfProbe.prepare('UPDATE workflows SET case_file=? WHERE id=?')
     .run(JSON.stringify({ decisions: [], updated_at: '2025-12-01T00:00:00Z' }), wf.id);
   assert.equal(store.loadCaseFile(wf.id).updatedAt, '2025-12-01T00:00:00Z');
 });

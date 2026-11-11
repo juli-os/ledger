@@ -18,7 +18,7 @@ Defined in: [platform/ledger/casefile.ts:119](https://github.com/juli-os/ledger/
 
 ### execution
 
-[`JsonValue`](../type-aliases/JsonValue.md)
+`JsonValue`
 
 ### now
 

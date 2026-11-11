@@ -22,7 +22,7 @@ Defined in: [platform/ledger/casefile.ts:108](https://github.com/juli-os/ledger/
 
 ### value
 
-[`JsonValue`](../type-aliases/JsonValue.md)
+`JsonValue`
 
 ### now
 

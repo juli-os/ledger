@@ -9,9 +9,7 @@
 - [ArtifactRef](interfaces/ArtifactRef.md)
 - [CaseDecision](interfaces/CaseDecision.md)
 - [CaseFileDoc](interfaces/CaseFileDoc.md)
-- [Clock](interfaces/Clock.md)
 - [CostBreakdown](interfaces/CostBreakdown.md)
-- [IdGen](interfaces/IdGen.md)
 - [LedgerEvent](interfaces/LedgerEvent.md)
 - [LifecycleStore](interfaces/LifecycleStore.md)
 - [ModelPrice](interfaces/ModelPrice.md)
@@ -32,8 +30,6 @@
 
 ## Type Aliases
 
-- [JsonRecord](type-aliases/JsonRecord.md)
-- [JsonValue](type-aliases/JsonValue.md)
 - [StepKind](type-aliases/StepKind.md)
 - [StepStatus](type-aliases/StepStatus.md)
 - [WorkflowStatus](type-aliases/WorkflowStatus.md)
@@ -45,9 +41,7 @@
 - [INSTRUCTABLE\_STEP\_KINDS](variables/INSTRUCTABLE_STEP_KINDS.md)
 - [PRICING\_RETRIEVED\_AT](variables/PRICING_RETRIEVED_AT.md)
 - [PRICING\_SOURCE](variables/PRICING_SOURCE.md)
-- [randomIds](variables/randomIds.md)
 - [STEP\_KINDS](variables/STEP_KINDS.md)
-- [systemClock](variables/systemClock.md)
 - [TERMINAL\_WORKFLOW\_STATUSES](variables/TERMINAL_WORKFLOW_STATUSES.md)
 
 ## Functions
@@ -56,7 +50,6 @@
 - [appendExecution](functions/appendExecution.md)
 - [appendReference](functions/appendReference.md)
 - [appendSection](functions/appendSection.md)
-- [asRecord](functions/asRecord.md)
 - [createLedgerStore](functions/createLedgerStore.md)
 - [createUsageStore](functions/createUsageStore.md)
 - [emptyCaseFile](functions/emptyCaseFile.md)
@@ -64,7 +57,5 @@
 - [originalEmail](functions/originalEmail.md)
 - [parseCaseFile](functions/parseCaseFile.md)
 - [priceUsage](functions/priceUsage.md)
-- [rfc3339](functions/rfc3339.md)
-- [safeParse](functions/safeParse.md)
 - [serializeCaseFile](functions/serializeCaseFile.md)
 - [withOriginal](functions/withOriginal.md)

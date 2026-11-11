@@ -6,7 +6,7 @@
 
 # Interface: TimelinePoint
 
-Defined in: [platform/ledger/usage.ts:63](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L63)
+Defined in: [platform/ledger/usage.ts:78](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L78)
 
 ## Properties
 
@@ -14,7 +14,7 @@ Defined in: [platform/ledger/usage.ts:63](https://github.com/juli-os/ledger/blob
 
 > `readonly` **calls**: `number`
 
-Defined in: [platform/ledger/usage.ts:65](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L65)
+Defined in: [platform/ledger/usage.ts:80](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L80)
 
 ***
 
@@ -22,7 +22,7 @@ Defined in: [platform/ledger/usage.ts:65](https://github.com/juli-os/ledger/blob
 
 > `readonly` **hour**: `string`
 
-Defined in: [platform/ledger/usage.ts:64](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L64)
+Defined in: [platform/ledger/usage.ts:79](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L79)
 
 ***
 
@@ -30,7 +30,7 @@ Defined in: [platform/ledger/usage.ts:64](https://github.com/juli-os/ledger/blob
 
 > `readonly` **inputTokens**: `number`
 
-Defined in: [platform/ledger/usage.ts:66](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L66)
+Defined in: [platform/ledger/usage.ts:81](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L81)
 
 ***
 
@@ -38,4 +38,4 @@ Defined in: [platform/ledger/usage.ts:66](https://github.com/juli-os/ledger/blob
 
 > `readonly` **outputTokens**: `number`
 
-Defined in: [platform/ledger/usage.ts:67](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L67)
+Defined in: [platform/ledger/usage.ts:82](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L82)

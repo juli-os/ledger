@@ -28,7 +28,7 @@ Defined in: [platform/ledger/casefile.ts:32](https://github.com/juli-os/ledger/b
 
 ### draft
 
-> `readonly` **draft**: [`JsonValue`](../type-aliases/JsonValue.md)
+> `readonly` **draft**: `JsonValue`
 
 Defined in: [platform/ledger/casefile.ts:31](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/casefile.ts#L31)
 
@@ -36,7 +36,7 @@ Defined in: [platform/ledger/casefile.ts:31](https://github.com/juli-os/ledger/b
 
 ### executions
 
-> `readonly` **executions**: readonly [`JsonValue`](../type-aliases/JsonValue.md)[]
+> `readonly` **executions**: readonly `JsonValue`[]
 
 Defined in: [platform/ledger/casefile.ts:30](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/casefile.ts#L30)
 
@@ -44,7 +44,7 @@ Defined in: [platform/ledger/casefile.ts:30](https://github.com/juli-os/ledger/b
 
 ### extract
 
-> `readonly` **extract**: [`JsonValue`](../type-aliases/JsonValue.md)
+> `readonly` **extract**: `JsonValue`
 
 Defined in: [platform/ledger/casefile.ts:29](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/casefile.ts#L29)
 

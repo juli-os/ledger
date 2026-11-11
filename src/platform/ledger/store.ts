@@ -6,6 +6,7 @@
 // HTTP 层拿到的都是冻结快照。状态转变只经显式方法发生，绝不整行 DELETE。
 
 import { DatabaseSync } from 'node:sqlite';
+import { openDatabase, sqlMigration, defineMigration, addColumnIfMissing, migrate, type Migration } from '@juli-os/basin';
 import type { JsonRecord, JsonValue } from '../shared/json.ts';
 import { asRecord, safeParse } from '../shared/json.ts';
 import { rfc3339, type Clock, type IdGen, randomIds, systemClock } from '../shared/clock.ts';
@@ -88,6 +89,31 @@ CREATE TABLE IF NOT EXISTS relays (
 CREATE INDEX IF NOT EXISTS idx_events_entity ON events(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_runs_session ON runs(session, status);
 `;
+
+// 版本化迁移（@juli-os/basin 底座，2026-11-11 第 2 步接入）：v1 建表全量，
+// v2 补列与索引——全部幂等，存量库（user_version=0、表已在）与新库同路收敛。
+// v2 各列的「为什么」见内联注释（历史决策原样保留）。
+const STORE_MIGRATIONS: readonly Migration[] = [
+  sqlMigration(1, 'create lifecycle tables', MIGRATIONS),
+  defineMigration(2, 'owner/thread/tenant columns + indexes + step timing', (db) => {
+    // V2 预留：owner 列支撑未来多租户/多操作员（可空，零行为变化）。
+    // 现在加列是零成本，事后加列在有数据的表上是手术。
+    addColumnIfMissing(db, 'workflows', 'owner', 'owner TEXT');
+    // 对话（Thread）一等建模（2026-09-21 二期）：邮件回复链共享 thread_id——
+    // 追加可空列合法（行内容不可变纪律只禁改写，不禁加列），索引服务看板归组。
+    addColumnIfMissing(db, 'workflows', 'thread_id', 'thread_id TEXT');
+    // 租户列（L1 多租户地基 2026-11-08）：desktop 按 internal/reflex 两租户隔离。
+    // NOT NULL DEFAULT 'internal' 让旧库升级零回填——存量行读出即 internal。
+    addColumnIfMissing(db, 'workflows', 'tenant', "tenant TEXT NOT NULL DEFAULT 'internal'");
+    // 索引必须在加列之后建：v1 建表时 thread_id/tenant 还不存在。
+    db.exec('CREATE INDEX IF NOT EXISTS idx_workflows_thread ON workflows(thread_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_workflows_tenant ON workflows(tenant, created_at)');
+    // 步骤时序（started/completed）：存量库补列——节点时序此前只能靠事件流
+    // 重放（goShape 自认 created_at 是假的）；列允许 NULL 兼容历史行。
+    addColumnIfMissing(db, 'workflow_steps', 'started_at', 'started_at TEXT');
+    addColumnIfMissing(db, 'workflow_steps', 'completed_at', 'completed_at TEXT');
+  }),
+];
 
 export interface LifecycleStore {
   readonly db: DatabaseSync;
@@ -298,32 +324,8 @@ export const createLedgerStore = (
 ): LifecycleStore => {
   const clock = deps.clock ?? systemClock;
   const ids = deps.ids ?? randomIds;
-  const db = new DatabaseSync(dbPath);
-  db.exec(MIGRATIONS);
-  // V2 预留：owner 列支撑未来多租户/多操作员（可空，零行为变化）。
-  // 现在加列是零成本，事后加列在有数据的表上是手术。
-  const wfCols = (db.prepare("PRAGMA table_info(workflows)").all() as { name: string }[]).map((c) => c.name);
-  if (!wfCols.includes('owner')) {
-    db.exec('ALTER TABLE workflows ADD COLUMN owner TEXT');
-  }
-  // 对话（Thread）一等建模（2026-09-21 二期）：邮件回复链共享 thread_id——
-  // 追加可空列合法（行内容不可变纪律只禁改写，不禁加列），索引服务看板归组。
-  if (!wfCols.includes('thread_id')) {
-    db.exec('ALTER TABLE workflows ADD COLUMN thread_id TEXT');
-  }
-  // 租户列（L1 多租户地基 2026-11-08）：desktop 按 internal/reflex 两租户隔离。
-  // NOT NULL DEFAULT 'internal' 让旧库升级零回填——存量行读出即 internal。
-  if (!wfCols.includes('tenant')) {
-    db.exec("ALTER TABLE workflows ADD COLUMN tenant TEXT NOT NULL DEFAULT 'internal'");
-  }
-  // 索引必须在加列之后建：MIGRATIONS 段跑在建表时，thread_id/tenant 还不存在。
-  db.exec('CREATE INDEX IF NOT EXISTS idx_workflows_thread ON workflows(thread_id)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_workflows_tenant ON workflows(tenant, created_at)');
-  // 步骤时序（started/completed）：存量库补列——节点时序此前只能靠事件流
-  // 重放（goShape 自认 created_at 是假的）；列允许 NULL 兼容历史行。
-  const stepCols = (db.prepare("PRAGMA table_info(workflow_steps)").all() as { name: string }[]).map((c) => c.name);
-  if (!stepCols.includes('started_at')) db.exec('ALTER TABLE workflow_steps ADD COLUMN started_at TEXT');
-  if (!stepCols.includes('completed_at')) db.exec('ALTER TABLE workflow_steps ADD COLUMN completed_at TEXT');
+  const db = openDatabase(dbPath);
+  migrate(db, STORE_MIGRATIONS);
   const now = (): string => rfc3339(clock.now());
 
   // JSON 列的读-合并-写（同步驱动下即原子）。

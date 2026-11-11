@@ -8,7 +8,7 @@
 
 > **createUsageStore**(`dbPath`, `now?`): [`UsageStore`](../interfaces/UsageStore.md)
 
-Defined in: [platform/ledger/usage.ts:146](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L146)
+Defined in: [platform/ledger/usage.ts:161](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L161)
 
 ## Parameters
 

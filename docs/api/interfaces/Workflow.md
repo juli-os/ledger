@@ -14,7 +14,7 @@ Defined in: [contracts/entities.ts:33](https://github.com/juli-os/ledger/blob/ma
 
 > `readonly` **createdAt**: `string`
 
-Defined in: [contracts/entities.ts:46](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L46)
+Defined in: [contracts/entities.ts:50](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L50)
 
 ***
 
@@ -36,9 +36,9 @@ Defined in: [contracts/entities.ts:36](https://github.com/juli-os/ledger/blob/ma
 
 ### meta
 
-> `readonly` **meta**: [`JsonRecord`](../type-aliases/JsonRecord.md)
+> `readonly` **meta**: `JsonRecord`
 
-Defined in: [contracts/entities.ts:45](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L45)
+Defined in: [contracts/entities.ts:49](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L49)
 
 ***
 
@@ -82,6 +82,18 @@ Defined in: [contracts/entities.ts:38](https://github.com/juli-os/ledger/blob/ma
 
 ***
 
+### tenant
+
+> `readonly` **tenant**: `string`
+
+Defined in: [contracts/entities.ts:48](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L48)
+
+租户（多租户地基 2026-11-08）：desktop 按 internal（橘粒科技）与
+reflex（瑞福莱）两租户隔离数据。NOT NULL DEFAULT 'internal'——旧库
+升级零回填，存量行读出即 internal。
+
+***
+
 ### threadId
 
 > `readonly` **threadId**: `string` \| `null`
@@ -105,4 +117,4 @@ Defined in: [contracts/entities.ts:37](https://github.com/juli-os/ledger/blob/ma
 
 > `readonly` **updatedAt**: `string`
 
-Defined in: [contracts/entities.ts:47](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L47)
+Defined in: [contracts/entities.ts:51](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L51)

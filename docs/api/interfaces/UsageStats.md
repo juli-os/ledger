@@ -6,7 +6,7 @@
 
 # Interface: UsageStats
 
-Defined in: [platform/ledger/usage.ts:56](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L56)
+Defined in: [platform/ledger/usage.ts:71](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L71)
 
 ## Properties
 
@@ -14,7 +14,7 @@ Defined in: [platform/ledger/usage.ts:56](https://github.com/juli-os/ledger/blob
 
 > `readonly` **byModel**: readonly `object`[]
 
-Defined in: [platform/ledger/usage.ts:60](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L60)
+Defined in: [platform/ledger/usage.ts:75](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L75)
 
 ***
 
@@ -22,7 +22,7 @@ Defined in: [platform/ledger/usage.ts:60](https://github.com/juli-os/ledger/blob
 
 > `readonly` **totalCalls**: `number`
 
-Defined in: [platform/ledger/usage.ts:57](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L57)
+Defined in: [platform/ledger/usage.ts:72](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L72)
 
 ***
 
@@ -30,7 +30,7 @@ Defined in: [platform/ledger/usage.ts:57](https://github.com/juli-os/ledger/blob
 
 > `readonly` **totalInputTokens**: `number`
 
-Defined in: [platform/ledger/usage.ts:58](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L58)
+Defined in: [platform/ledger/usage.ts:73](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L73)
 
 ***
 
@@ -38,4 +38,4 @@ Defined in: [platform/ledger/usage.ts:58](https://github.com/juli-os/ledger/blob
 
 > `readonly` **totalOutputTokens**: `number`
 
-Defined in: [platform/ledger/usage.ts:59](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L59)
+Defined in: [platform/ledger/usage.ts:74](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L74)

@@ -1,7 +1,7 @@
 {
   "name": "@juli-os/ledger",
-  "version": "0.3.0",
-  "description": "juli-os L1 layer: the ledger of record for agent work — workflows, steps, case files, and token usage in one zero-dependency SQLite layer.",
+  "version": "0.3.1",
+  "description": "juli-os L1 layer: the ledger of record for agent work — workflows, steps, case files, and token usage in one SQLite layer (schema via @juli-os/basin).",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -46,5 +46,8 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/juli-os/ledger.git"
+  },
+  "dependencies": {
+    "@juli-os/basin": "^0.1.0"
   }
 }

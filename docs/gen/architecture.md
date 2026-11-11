@@ -13,13 +13,16 @@ flowchart LR
   n3["platform/shared"]
   n0 -->|2| n1
   n0 -->|4| n2
-  n0 -->|2| n3
   n1 -->|1| n3
   n2 -->|3| n1
   n2 -->|6| n3
+  x0:::external["@juli-os/basin"]
+  n2 -.->|2| x0
+  classDef external stroke-dasharray: 5 5
 ```
 
 边上的数字 = 该方向聚合到的相对 import 条数；同目录内部依赖不画。
+虚线节点 = 对 @juli-os/* 兄弟包的依赖。
 
 ## 目录职责
 

@@ -2,6 +2,7 @@
 // 按模型统计 + 时间线。node:sqlite，独立 db 文件（prompt_usage.db）。
 
 import { DatabaseSync } from 'node:sqlite';
+import { openDatabase, sqlMigration, defineMigration, addColumnIfMissing, migrate, type Migration } from '@juli-os/basin';
 import { readdirSync, openSync, readSync, fstatSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { priceUsage, type UsageCost, type UsageRow } from './pricing.ts';
@@ -39,6 +40,20 @@ CREATE TABLE IF NOT EXISTS usage_meta (
   value TEXT NOT NULL DEFAULT ''
 );
 `;
+
+// 版本化迁移（@juli-os/basin 底座，2026-11-11 第 2 步接入）：v1 建表全量，
+// v2 存量库补列与索引——全部幂等，老库（user_version=0）与新库同路收敛。
+// 各列的「为什么」见内联注释（历史决策原样保留）。
+const USAGE_MIGRATIONS: readonly Migration[] = [
+  sqlMigration(1, 'create usage tables', MIGRATIONS),
+  // 旧库加列（wf_66a9b632154d / wf_2542c2c7eb13）：CREATE IF NOT EXISTS
+  // 不会给已存在的表加列；会话维度查询索引（wf_be61c3a55842）列补齐后才能建。
+  defineMigration(2, 'cached_tokens/tmux_session columns + session index', (db) => {
+    addColumnIfMissing(db, 'prompt_usage', 'cached_tokens', 'cached_tokens INTEGER NOT NULL DEFAULT 0');
+    addColumnIfMissing(db, 'prompt_usage', 'tmux_session', "tmux_session TEXT NOT NULL DEFAULT ''");
+    db.exec('CREATE INDEX IF NOT EXISTS idx_usage_session ON prompt_usage(tmux_session, id)');
+  }),
+];
 
 export interface UsageRecord {
   readonly id: number;
@@ -144,15 +159,8 @@ const windowUsageRows = (db: DatabaseSync, tmuxSession: string, windows: readonl
 const REPLAY_COOLDOWN_MS = 24 * 3_600_000;
 
 export const createUsageStore = (dbPath: string, now = (): Date => new Date()): UsageStore => {
-  const db = new DatabaseSync(dbPath);
-  db.exec(MIGRATIONS);
-  // 旧库加列（wf_66a9b632154d）：CREATE IF NOT EXISTS 不会给已存在的表加列。
-  try { db.exec('ALTER TABLE prompt_usage ADD COLUMN cached_tokens INTEGER NOT NULL DEFAULT 0'); } catch { /* 已有列 */ }
-  // 会话归属（wf_2542c2c7eb13 per-workflow prompt 计数）：ingest 反查映射写入
-  try { db.exec(`ALTER TABLE prompt_usage ADD COLUMN tmux_session TEXT NOT NULL DEFAULT ''`); } catch { /* 已有列 */ }
-  // 会话维度查询索引（wf_be61c3a55842 lastClaudeCodeAt 等）：列在上方 ALTER
-  // 补齐后才能建——放进 MIGRATIONS 会让新库在加列前炸 no such column。
-  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_usage_session ON prompt_usage(tmux_session, id)`); } catch { /* 已有索引 */ }
+  const db = openDatabase(dbPath);
+  migrate(db, USAGE_MIGRATIONS);
   return {
     record(r) {
       db.prepare(`INSERT INTO prompt_usage (source, note, model, input_tokens, output_tokens, cached_tokens, duration_ms, error, created_at)

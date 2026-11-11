@@ -6,7 +6,7 @@
 
 # Interface: Step
 
-Defined in: [contracts/entities.ts:50](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L50)
+Defined in: [contracts/entities.ts:54](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L54)
 
 ## Properties
 
@@ -14,7 +14,7 @@ Defined in: [contracts/entities.ts:50](https://github.com/juli-os/ledger/blob/ma
 
 > `readonly` **completedAt**: `string` \| `null`
 
-Defined in: [contracts/entities.ts:65](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L65)
+Defined in: [contracts/entities.ts:69](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L69)
 
 终态首次到达时刻；null = 未终结或历史行。
 
@@ -24,15 +24,15 @@ Defined in: [contracts/entities.ts:65](https://github.com/juli-os/ledger/blob/ma
 
 > `readonly` **id**: `string`
 
-Defined in: [contracts/entities.ts:51](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L51)
+Defined in: [contracts/entities.ts:55](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L55)
 
 ***
 
 ### input
 
-> `readonly` **input**: [`JsonRecord`](../type-aliases/JsonRecord.md)
+> `readonly` **input**: `JsonRecord`
 
-Defined in: [contracts/entities.ts:57](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L57)
+Defined in: [contracts/entities.ts:61](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L61)
 
 ***
 
@@ -40,15 +40,15 @@ Defined in: [contracts/entities.ts:57](https://github.com/juli-os/ledger/blob/ma
 
 > `readonly` **kind**: [`StepKind`](../type-aliases/StepKind.md)
 
-Defined in: [contracts/entities.ts:54](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L54)
+Defined in: [contracts/entities.ts:58](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L58)
 
 ***
 
 ### output
 
-> `readonly` **output**: [`JsonRecord`](../type-aliases/JsonRecord.md)
+> `readonly` **output**: `JsonRecord`
 
-Defined in: [contracts/entities.ts:58](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L58)
+Defined in: [contracts/entities.ts:62](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L62)
 
 ***
 
@@ -56,7 +56,7 @@ Defined in: [contracts/entities.ts:58](https://github.com/juli-os/ledger/blob/ma
 
 > `readonly` **seq**: `number`
 
-Defined in: [contracts/entities.ts:53](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L53)
+Defined in: [contracts/entities.ts:57](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L57)
 
 ***
 
@@ -64,7 +64,7 @@ Defined in: [contracts/entities.ts:53](https://github.com/juli-os/ledger/blob/ma
 
 > `readonly` **startedAt**: `string`
 
-Defined in: [contracts/entities.ts:63](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L63)
+Defined in: [contracts/entities.ts:67](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L67)
 
 节点时序：离开 pending 的第一次转变（闸门 waiting_human 也算开跑）。
 空串 = 历史行（补列迁移前）或尚未开跑。
@@ -75,7 +75,7 @@ Defined in: [contracts/entities.ts:63](https://github.com/juli-os/ledger/blob/ma
 
 > `readonly` **status**: [`StepStatus`](../type-aliases/StepStatus.md)
 
-Defined in: [contracts/entities.ts:56](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L56)
+Defined in: [contracts/entities.ts:60](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L60)
 
 ***
 
@@ -83,7 +83,7 @@ Defined in: [contracts/entities.ts:56](https://github.com/juli-os/ledger/blob/ma
 
 > `readonly` **summary**: `string`
 
-Defined in: [contracts/entities.ts:59](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L59)
+Defined in: [contracts/entities.ts:63](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L63)
 
 ***
 
@@ -91,7 +91,7 @@ Defined in: [contracts/entities.ts:59](https://github.com/juli-os/ledger/blob/ma
 
 > `readonly` **title**: `string`
 
-Defined in: [contracts/entities.ts:55](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L55)
+Defined in: [contracts/entities.ts:59](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L59)
 
 ***
 
@@ -99,7 +99,7 @@ Defined in: [contracts/entities.ts:55](https://github.com/juli-os/ledger/blob/ma
 
 > `readonly` **updatedAt**: `string`
 
-Defined in: [contracts/entities.ts:60](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L60)
+Defined in: [contracts/entities.ts:64](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L64)
 
 ***
 
@@ -107,4 +107,4 @@ Defined in: [contracts/entities.ts:60](https://github.com/juli-os/ledger/blob/ma
 
 > `readonly` **workflowId**: `string`
 
-Defined in: [contracts/entities.ts:52](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L52)
+Defined in: [contracts/entities.ts:56](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L56)

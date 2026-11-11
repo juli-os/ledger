@@ -8,7 +8,7 @@
 
 > **createLedgerStore**(`dbPath`, `deps?`): [`LifecycleStore`](../interfaces/LifecycleStore.md)
 
-Defined in: [platform/ledger/store.ts:289](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/store.ts#L289)
+Defined in: [platform/ledger/store.ts:321](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/store.ts#L321)
 
 ## Parameters
 
@@ -20,11 +20,11 @@ Defined in: [platform/ledger/store.ts:289](https://github.com/juli-os/ledger/blo
 
 #### clock?
 
-[`Clock`](../interfaces/Clock.md)
+`Clock`
 
 #### ids?
 
-[`IdGen`](../interfaces/IdGen.md)
+`IdGen`
 
 ## Returns
 

@@ -6,7 +6,7 @@
 
 # Interface: UsageRecord
 
-Defined in: [platform/ledger/usage.ts:43](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L43)
+Defined in: [platform/ledger/usage.ts:58](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L58)
 
 ## Properties
 
@@ -14,7 +14,7 @@ Defined in: [platform/ledger/usage.ts:43](https://github.com/juli-os/ledger/blob
 
 > `readonly` **cachedTokens**: `number`
 
-Defined in: [platform/ledger/usage.ts:50](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L50)
+Defined in: [platform/ledger/usage.ts:65](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L65)
 
 ***
 
@@ -22,7 +22,7 @@ Defined in: [platform/ledger/usage.ts:50](https://github.com/juli-os/ledger/blob
 
 > `readonly` **createdAt**: `string`
 
-Defined in: [platform/ledger/usage.ts:53](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L53)
+Defined in: [platform/ledger/usage.ts:68](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L68)
 
 ***
 
@@ -30,7 +30,7 @@ Defined in: [platform/ledger/usage.ts:53](https://github.com/juli-os/ledger/blob
 
 > `readonly` **durationMs**: `number`
 
-Defined in: [platform/ledger/usage.ts:51](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L51)
+Defined in: [platform/ledger/usage.ts:66](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L66)
 
 ***
 
@@ -38,7 +38,7 @@ Defined in: [platform/ledger/usage.ts:51](https://github.com/juli-os/ledger/blob
 
 > `readonly` **error**: `string`
 
-Defined in: [platform/ledger/usage.ts:52](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L52)
+Defined in: [platform/ledger/usage.ts:67](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L67)
 
 ***
 
@@ -46,7 +46,7 @@ Defined in: [platform/ledger/usage.ts:52](https://github.com/juli-os/ledger/blob
 
 > `readonly` **id**: `number`
 
-Defined in: [platform/ledger/usage.ts:44](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L44)
+Defined in: [platform/ledger/usage.ts:59](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L59)
 
 ***
 
@@ -54,7 +54,7 @@ Defined in: [platform/ledger/usage.ts:44](https://github.com/juli-os/ledger/blob
 
 > `readonly` **inputTokens**: `number`
 
-Defined in: [platform/ledger/usage.ts:48](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L48)
+Defined in: [platform/ledger/usage.ts:63](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L63)
 
 ***
 
@@ -62,7 +62,7 @@ Defined in: [platform/ledger/usage.ts:48](https://github.com/juli-os/ledger/blob
 
 > `readonly` **model**: `string`
 
-Defined in: [platform/ledger/usage.ts:47](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L47)
+Defined in: [platform/ledger/usage.ts:62](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L62)
 
 ***
 
@@ -70,7 +70,7 @@ Defined in: [platform/ledger/usage.ts:47](https://github.com/juli-os/ledger/blob
 
 > `readonly` **note**: `string`
 
-Defined in: [platform/ledger/usage.ts:46](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L46)
+Defined in: [platform/ledger/usage.ts:61](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L61)
 
 ***
 
@@ -78,7 +78,7 @@ Defined in: [platform/ledger/usage.ts:46](https://github.com/juli-os/ledger/blob
 
 > `readonly` **outputTokens**: `number`
 
-Defined in: [platform/ledger/usage.ts:49](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L49)
+Defined in: [platform/ledger/usage.ts:64](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L64)
 
 ***
 
@@ -86,4 +86,4 @@ Defined in: [platform/ledger/usage.ts:49](https://github.com/juli-os/ledger/blob
 
 > `readonly` **source**: `string`
 
-Defined in: [platform/ledger/usage.ts:45](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L45)
+Defined in: [platform/ledger/usage.ts:60](https://github.com/juli-os/ledger/blob/main/src/platform/ledger/usage.ts#L60)

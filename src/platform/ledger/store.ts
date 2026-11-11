@@ -115,6 +115,47 @@ const STORE_MIGRATIONS: readonly Migration[] = [
   }),
 ];
 
+/** stats 视图的计数形状（workflowStats）。 */
+export interface WorkflowStats {
+  readonly byDay: readonly { readonly day: string; readonly count: number }[];
+  readonly byStatus: readonly { readonly status: string; readonly count: number }[];
+  readonly total: number;
+}
+
+/** 失败步行（listFailedSteps）：output 留原文（JSON），消费方自解 error/session。 */
+export interface FailedStepRow {
+  readonly stepId: string;
+  readonly workflowId: string;
+  readonly seq: number;
+  readonly title: string;
+  readonly outputRaw: string;
+  readonly updatedAt: string;
+  readonly workflowTitle: string;
+  readonly session: string;
+}
+
+/** 步骤+所属单概要（listStepsWithWorkflow）。 */
+export interface StepWithWorkflow {
+  readonly step: Step;
+  readonly workflow?: { readonly id: string; readonly title: string; readonly kind: string; readonly status: string };
+}
+
+/** 工作流+等待人拍板步计数（listWorkflowsWithWaiting）。 */
+export interface WorkflowWithWaiting {
+  readonly workflow: Workflow;
+  readonly waitingSteps: number;
+}
+
+/** 近期单摘要（recentWorkflowDigests）：meta 已解析，缺省空对象。 */
+export interface WorkflowDigest {
+  readonly id: string;
+  readonly kind: string;
+  readonly title: string;
+  readonly status: string;
+  readonly meta: JsonRecord;
+  readonly createdAt: string;
+}
+
 export interface LifecycleStore {
   readonly db: DatabaseSync;
   // workflows
@@ -211,6 +252,23 @@ export interface LifecycleStore {
    * 根判据：沿链向上最高的任务卡；任务卡挂在邮件单下（方向修正链）时根=
    * 任务卡自身——邮件单不是任务卡，不吞并。展示级投影，默认扫最近 500 单。 */
   taskViews(limit?: number): { readonly views: readonly TaskView[]; readonly map: Readonly<Record<string, string>> };
+
+  // ---- 读侧正规出口（2026-11-11 ledger 关门：主仓直查 SQL 清零，查询进包）----
+
+  /** 按日/按状态的工作流计数（byDay 切本地日，与 stats 视图原语义一致）。 */
+  workflowStats(sinceIso?: string): WorkflowStats;
+  /** 失败步（kind=agent/verify）连同所属单标题，看板/agents 页消费。 */
+  listFailedSteps(opts?: { readonly limit?: number; readonly tenant?: string }): readonly FailedStepRow[];
+  /** one 身份的租户事件查询：租户条件进 SQL 再 LIMIT（先截断再过滤会挤窗口）。 */
+  listEventsForTenant(tenant: string, limit?: number, types?: readonly string[]): readonly LedgerEvent[];
+  /** 步骤连同所属单概要（status/tenant 过滤 + updated_at 倒序），steps 列表页消费。 */
+  listStepsWithWorkflow(opts?: { readonly status?: string; readonly tenant?: string; readonly limit?: number }): readonly StepWithWorkflow[];
+  /** 工作流列表附 waiting_human 步计数（Go 形列表页消费）。 */
+  listWorkflowsWithWaiting(opts?: { readonly status?: string; readonly tenant?: string; readonly limit?: number }): readonly WorkflowWithWaiting[];
+  /** 近期单子摘要（meta 解析后），客户档案的往来事实聚合消费。 */
+  recentWorkflowDigests(limit?: number): readonly WorkflowDigest[];
+  /** prompt 回写状态（引擎失败路径的账面整洁；全仓不再直写 prompts 表）。 */
+  setPromptStatus(id: string, status: Prompt['status']): void;
 }
 
 type Row = Record<string, string | number | bigint | null | Uint8Array>;
@@ -845,6 +903,112 @@ export const createLedgerStore = (
           return cb.localeCompare(ca);
         });
       return { views, map };
+    },
+
+    // ---- 读侧正规出口（2026-11-11 ledger 关门）：SQL 不出包 ----
+
+    workflowStats(sinceIso) {
+      const since = sinceIso ?? '';
+      const byDay = (db.prepare(
+        `SELECT strftime('%Y-%m-%d', created_at, 'localtime') AS day, COUNT(*) AS c
+         FROM workflows ${since === '' ? '' : 'WHERE created_at >= ?'} GROUP BY day ORDER BY day`,
+      ).all(...(since === '' ? [] : [since])) as Row[]).map((r) => ({
+        day: String(r['day']), count: Number(r['c']),
+      }));
+      const byStatus = (db.prepare(
+        'SELECT status, COUNT(*) AS c FROM workflows GROUP BY status ORDER BY c DESC',
+      ).all() as Row[]).map((r) => ({ status: String(r['status']), count: Number(r['c']) }));
+      const total = Number((db.prepare('SELECT COUNT(*) AS c FROM workflows').get() as Row)['c']);
+      return { byDay, byStatus, total };
+    },
+
+    listFailedSteps({ limit = 30, tenant } = {}) {
+      const cond = tenant === undefined ? '' : ' AND w.tenant = ?';
+      const rows = db.prepare(
+        `SELECT s.id AS step_id, s.workflow_id, s.seq, s.title, s.output, s.updated_at,
+                w.title AS workflow_title, w.session AS session
+         FROM workflow_steps s LEFT JOIN workflows w ON w.id = s.workflow_id
+         WHERE s.status = 'failed' AND s.kind IN ('agent','verify')${cond}
+         ORDER BY s.updated_at DESC LIMIT ?`,
+      ).all(...(tenant === undefined ? [] : [tenant]), limit) as Row[];
+      return rows.map((r) => ({
+        stepId: String(r['step_id']), workflowId: String(r['workflow_id']),
+        seq: Number(r['seq']), title: String(r['title']),
+        outputRaw: String(r['output'] ?? '{}'), updatedAt: String(r['updated_at']),
+        workflowTitle: String(r['workflow_title'] ?? ''), session: String(r['session'] ?? ''),
+      }));
+    },
+
+    listEventsForTenant(tenant, limit = 200, types) {
+      const typeCond = types !== undefined && types.length > 0
+        ? `e.type IN (${types.map(() => '?').join(',')}) AND `
+        : '';
+      const rows = db.prepare(
+        `SELECT e.id, e.entity_type, e.entity_id, e.type, e.payload, e.ts FROM events e
+         WHERE ${typeCond}(
+           (e.entity_type = 'workflow' AND EXISTS (SELECT 1 FROM workflows w WHERE w.id = e.entity_id AND w.tenant = ?))
+           OR
+           (e.entity_type = 'step' AND EXISTS (
+             SELECT 1 FROM workflow_steps s JOIN workflows w ON w.id = s.workflow_id WHERE s.id = e.entity_id AND w.tenant = ?))
+         )
+         ORDER BY e.id DESC LIMIT ?`,
+      ).all(...(types ?? []), tenant, tenant, limit) as Row[];
+      return rows.map(rowToEvent);
+    },
+
+    listStepsWithWorkflow({ status, tenant, limit = 100 } = {}) {
+      const conds: string[] = [];
+      const params: (string | number)[] = [];
+      if (status !== undefined && status !== '') { conds.push('s.status = ?'); params.push(status); }
+      if (tenant !== undefined) { conds.push('w.tenant = ?'); params.push(tenant); }
+      const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
+      const rows = db.prepare(
+        `SELECT s.*, w.id AS w_id, w.title AS w_title, w.kind AS w_kind, w.status AS w_status
+         FROM workflow_steps s LEFT JOIN workflows w ON w.id = s.workflow_id
+         ${where} ORDER BY s.updated_at DESC LIMIT ?`,
+      ).all(...params, limit) as Row[];
+      return rows.map((r) => ({
+        step: rowToStep(r),
+        ...(r['w_id'] === null ? {} : {
+          workflow: {
+            id: String(r['w_id']), title: String(r['w_title'] ?? ''),
+            kind: String(r['w_kind'] ?? ''), status: String(r['w_status'] ?? ''),
+          },
+        }),
+      }));
+    },
+
+    listWorkflowsWithWaiting({ status, tenant, limit = 100 } = {}) {
+      const conds: string[] = [];
+      const params: (string | number)[] = [];
+      if (status !== undefined && status !== '') { conds.push('w.status = ?'); params.push(status); }
+      if (tenant !== undefined) { conds.push('w.tenant = ?'); params.push(tenant); }
+      const where = conds.length > 0 ? `WHERE ${conds.join(' AND ')}` : '';
+      const rows = db.prepare(
+        `SELECT w.*,
+           (SELECT COUNT(*) FROM workflow_steps s WHERE s.workflow_id = w.id AND s.status = 'waiting_human') AS waiting_steps
+         FROM workflows w ${where}
+         ORDER BY w.created_at DESC, w.rowid DESC LIMIT ?`,
+      ).all(...params, limit) as Row[];
+      return rows.map((r) => ({
+        workflow: rowToWorkflow(r),
+        waitingSteps: Number(r['waiting_steps']),
+      }));
+    },
+
+    recentWorkflowDigests(limit = 200) {
+      const rows = db.prepare(
+        'SELECT id, kind, title, status, meta, created_at FROM workflows ORDER BY created_at DESC, rowid DESC LIMIT ?',
+      ).all(limit) as Row[];
+      return rows.map((r) => ({
+        id: String(r['id']), kind: String(r['kind'] ?? ''), title: String(r['title'] ?? ''),
+        status: String(r['status']), meta: asRecord(safeParse(str(r['meta']))),
+        createdAt: String(r['created_at']),
+      }));
+    },
+
+    setPromptStatus(id, status) {
+      db.prepare('UPDATE prompts SET status=? WHERE id=?').run(status, id);
     },
 
     latestPromptForSession(session, statuses) {

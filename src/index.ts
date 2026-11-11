@@ -4,7 +4,10 @@
 // contracts/entities, or platform/shared/{clock,json} is re-exported here.
 // Dependency rule: only inward deps (shared/contracts); consumers must never
 // bypass this facade to reach internal files.
-export { createLedgerStore, type LifecycleStore } from './platform/ledger/store.ts';
+export { createLedgerStore, type LifecycleStore,
+  type WorkflowStats, type FailedStepRow, type StepWithWorkflow,
+  type WorkflowWithWaiting, type WorkflowDigest,
+} from './platform/ledger/store.ts';
 export type { Workflow, Step, WorkflowStatus, StepStatus, StepKind } from './contracts/entities.ts';
 // 0.1.3: complete the entities surface — kind capability sets + ledger companion
 // entities were internal-only; juli-service-ts consumers need them at the root

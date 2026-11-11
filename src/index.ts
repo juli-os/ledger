@@ -28,5 +28,7 @@ export {
   appendSection, appendExecution, appendDecision, appendReference, originalEmail,
   type CaseDecision, type ArtifactRef, type CaseFileDoc,
 } from './platform/ledger/casefile.ts';
-export { rfc3339, systemClock, randomIds, type Clock, type IdGen } from './platform/shared/clock.ts';
-export { asRecord, safeParse, type JsonRecord, type JsonValue } from './platform/shared/json.ts';
+// 0.3.0：工具出口（rfc3339/systemClock/randomIds/Clock/IdGen/asRecord/
+// safeParse/JsonRecord/JsonValue）已删——事实源收编回主仓 src/platform/shared/
+// （juli-service-ts 2026-11-11 架构调整第 1 步；主仓对本包这些出口零借用，
+// grep 实证）。本包内部继续用 src/platform/shared/，不再对外导出。

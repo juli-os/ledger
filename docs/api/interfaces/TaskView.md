@@ -6,7 +6,7 @@
 
 # Interface: TaskView
 
-Defined in: [contracts/entities.ts:99](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L99)
+Defined in: [contracts/entities.ts:103](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L103)
 
 Task 投影（第四期最小转正 2026-09-22）：Task 不建新表——「任务卡」=
 meta.mode='nodes' 的 adhoc 单（engine.startTask 建），挂单经
@@ -19,7 +19,7 @@ meta.related_workflow（兜底 parent_id）链接。一个 Task = 任务卡 + �
 
 > `readonly` **status**: [`WorkflowStatus`](../type-aliases/WorkflowStatus.md)
 
-Defined in: [contracts/entities.ts:104](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L104)
+Defined in: [contracts/entities.ts:108](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L108)
 
 任务卡自身状态（WorkflowStatus）。
 
@@ -29,7 +29,7 @@ Defined in: [contracts/entities.ts:104](https://github.com/juli-os/ledger/blob/m
 
 > `readonly` **taskId**: `string`
 
-Defined in: [contracts/entities.ts:101](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L101)
+Defined in: [contracts/entities.ts:105](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L105)
 
 任务卡 workflow id（= Task id）。
 
@@ -39,7 +39,7 @@ Defined in: [contracts/entities.ts:101](https://github.com/juli-os/ledger/blob/m
 
 > `readonly` **title**: `string`
 
-Defined in: [contracts/entities.ts:102](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L102)
+Defined in: [contracts/entities.ts:106](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L106)
 
 ***
 
@@ -47,6 +47,6 @@ Defined in: [contracts/entities.ts:102](https://github.com/juli-os/ledger/blob/m
 
 > `readonly` **workflowIds**: readonly `string`[]
 
-Defined in: [contracts/entities.ts:106](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L106)
+Defined in: [contracts/entities.ts:110](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L110)
 
 归属本 Task 的全部流水 id（含任务卡自身），新→旧。

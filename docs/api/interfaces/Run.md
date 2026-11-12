@@ -6,7 +6,7 @@
 
 # Interface: Run
 
-Defined in: [contracts/entities.ts:79](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L79)
+Defined in: [contracts/entities.ts:83](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L83)
 
 ## Properties
 
@@ -14,7 +14,7 @@ Defined in: [contracts/entities.ts:79](https://github.com/juli-os/ledger/blob/ma
 
 > `readonly` **createdAt**: `string`
 
-Defined in: [contracts/entities.ts:84](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L84)
+Defined in: [contracts/entities.ts:88](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L88)
 
 ***
 
@@ -22,7 +22,7 @@ Defined in: [contracts/entities.ts:84](https://github.com/juli-os/ledger/blob/ma
 
 > `readonly` **id**: `string`
 
-Defined in: [contracts/entities.ts:80](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L80)
+Defined in: [contracts/entities.ts:84](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L84)
 
 ***
 
@@ -30,7 +30,7 @@ Defined in: [contracts/entities.ts:80](https://github.com/juli-os/ledger/blob/ma
 
 > `readonly` **session**: `string`
 
-Defined in: [contracts/entities.ts:82](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L82)
+Defined in: [contracts/entities.ts:86](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L86)
 
 ***
 
@@ -38,7 +38,7 @@ Defined in: [contracts/entities.ts:82](https://github.com/juli-os/ledger/blob/ma
 
 > `readonly` **status**: `"running"` \| `"completed"` \| `"failed"` \| `"idle"`
 
-Defined in: [contracts/entities.ts:83](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L83)
+Defined in: [contracts/entities.ts:87](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L87)
 
 ***
 
@@ -46,4 +46,4 @@ Defined in: [contracts/entities.ts:83](https://github.com/juli-os/ledger/blob/ma
 
 > `readonly` **workflowId**: `string`
 
-Defined in: [contracts/entities.ts:81](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L81)
+Defined in: [contracts/entities.ts:85](https://github.com/juli-os/ledger/blob/main/src/contracts/entities.ts#L85)
